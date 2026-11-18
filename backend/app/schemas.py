@@ -1372,6 +1372,145 @@ class ClinicalTimelineEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ==============================================================================
+# Milestone 9 — Offline-First Synchronization & Resilient Field Operations
+# ==============================================================================
+
+class DeviceSyncRegisterRequest(BaseModel):
+    device_identifier: str = Field(..., min_length=4, max_length=64)
+    platform: str = Field("mobile", max_length=30)
+    app_version: str = Field("1.0.0", max_length=50)
+    device_model: Optional[str] = Field(None, max_length=100)
+    push_token: Optional[str] = Field(None, max_length=255)
+    organization_id: Optional[int] = None
+
+
+class DeviceSyncResponse(BaseModel):
+    id: int
+    device_identifier: Optional[str] = None
+    user_id: int
+    organization_id: Optional[int] = None
+    platform: str
+    app_version: Optional[str] = None
+    device_model: Optional[str] = None
+    is_active: bool
+    is_revoked: bool
+    revoked_at: Optional[datetime] = None
+    revoked_reason: Optional[str] = None
+    last_sync_at: Optional[datetime] = None
+    sync_cursor: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DeviceRevokeRequest(BaseModel):
+    reason: Optional[str] = Field("Device decommissioned or revoked", max_length=255)
+
+
+class SyncActionItem(BaseModel):
+    action_uuid: str = Field(..., min_length=8, max_length=64)
+    action_type: str = Field(..., max_length=60)
+    mission_id: Optional[int] = None
+    encounter_id: Optional[int] = None
+    client_timestamp: datetime
+    device_sequence_number: Optional[int] = 1
+    payload: Dict[str, Any]
+
+
+class SyncUploadBatchRequest(BaseModel):
+    device_id: str = Field(..., min_length=4, max_length=64)
+    client_batch_id: str = Field(..., min_length=8, max_length=64)
+    actions: List[SyncActionItem] = Field(...)
+
+
+class SyncActionReceiptResponse(BaseModel):
+    action_uuid: str
+    status: str  # ACKNOWLEDGED, PERMANENT_FAILURE, RETRYABLE_FAILURE, CONFLICT
+    server_ack_id: str
+    action_type: str
+    client_timestamp: datetime
+    server_receipt_timestamp: datetime
+    response_payload: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
+    conflict_details: Optional[Dict[str, Any]] = None
+
+
+class SyncUploadBatchResponse(BaseModel):
+    batch_uuid: str
+    device_id: str
+    total_actions: int
+    accepted_actions: int
+    failed_actions: int
+    conflict_actions: int
+    server_receipt_timestamp: datetime
+    processing_time_ms: float
+    results: List[SyncActionReceiptResponse]
+
+
+class SyncDownloadRequest(BaseModel):
+    device_id: str = Field(..., min_length=4, max_length=64)
+    since_cursor: Optional[str] = "0"
+    limit: Optional[int] = Field(50, ge=1, le=200)
+
+
+class SyncDownloadChangeItem(BaseModel):
+    change_id: str
+    entity_type: str
+    entity_id: int
+    operation: str
+    timestamp: datetime
+    data: Dict[str, Any]
+
+
+class SyncDownloadResponse(BaseModel):
+    device_id: str
+    previous_cursor: str
+    next_cursor: str
+    has_more: bool
+    changes_count: int
+    changes: List[SyncDownloadChangeItem]
+    server_time: datetime
+
+
+class SyncAckRequest(BaseModel):
+    device_id: str = Field(..., min_length=4, max_length=64)
+    acknowledged_cursor: str
+    acknowledged_action_uuids: Optional[List[str]] = []
+
+
+class SyncAckResponse(BaseModel):
+    device_id: str
+    acknowledged_cursor: str
+    status: str = "success"
+    updated_at: datetime
+
+
+class SyncConflictResponse(BaseModel):
+    id: int
+    conflict_token: str
+    action_uuid: str
+    device_id: int
+    user_id: int
+    mission_id: Optional[int] = None
+    encounter_id: Optional[int] = None
+    conflict_category: str
+    reason: str
+    client_state: Dict[str, Any]
+    server_state: Dict[str, Any]
+    resolution_status: str
+    resolution_notes: Optional[str] = None
+    resolved_by_user_id: Optional[int] = None
+    resolved_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class SyncConflictReconcileRequest(BaseModel):
+    resolution: str = Field(..., description="RESOLVED_SERVER, RESOLVED_CLIENT, DISCARDED")
+    notes: Optional[str] = None
+
+
+
 
 
 

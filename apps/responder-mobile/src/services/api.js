@@ -94,4 +94,58 @@ export const mobileApi = {
       body: JSON.stringify({ latitude, longitude }),
     });
   },
+
+  // Milestone 9 Offline Sync Endpoints
+  registerDevice(deviceData) {
+    return this.request('sync/v1/devices/register', {
+      method: 'POST',
+      body: JSON.stringify(deviceData),
+    });
+  },
+
+  uploadSyncBatch(batchData) {
+    return this.request('sync/v1/upload', {
+      method: 'POST',
+      body: JSON.stringify(batchData),
+    });
+  },
+
+  downloadSyncChanges(deviceId, sinceCursor = '0', limit = 50) {
+    return this.request('sync/v1/download', {
+      method: 'POST',
+      body: JSON.stringify({
+        device_id: deviceId,
+        since_cursor: sinceCursor,
+        limit,
+      }),
+    });
+  },
+
+  acknowledgeCursor(deviceId, cursor, acknowledgedActionUuids = []) {
+    return this.request('sync/v1/ack', {
+      method: 'POST',
+      body: JSON.stringify({
+        device_id: deviceId,
+        acknowledged_cursor: cursor,
+        acknowledged_action_uuids: acknowledgedActionUuids,
+      }),
+    });
+  },
+
+  getSyncStatus(deviceId = null) {
+    const q = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
+    return this.request(`sync/v1/status${q}`);
+  },
+
+  getConflicts(deviceId = null) {
+    const q = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
+    return this.request(`sync/v1/conflicts${q}`);
+  },
+
+  reconcileConflict(conflictToken, resolution, notes = '') {
+    return this.request(`sync/v1/conflicts/${conflictToken}/reconcile`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution, notes }),
+    });
+  },
 };

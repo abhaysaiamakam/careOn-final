@@ -636,10 +636,22 @@ class DeviceRegistration(Base):
     device_model = Column(String(100), nullable=True)
     app_version = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    device_identifier = Column(String(64), unique=True, index=True, nullable=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    is_revoked = Column(Boolean, default=False, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    revoked_reason = Column(String(255), nullable=True)
+    last_sync_at = Column(DateTime, nullable=True)
+    sync_cursor = Column(String(64), nullable=False, default="0")
     last_seen_at = Column(DateTime, default=utc_now, nullable=False)
     created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     user = relationship("User")
+    organization = relationship("Organization")
+    sync_batches = relationship("SyncBatchReceipt", back_populates="device", cascade="all, delete-orphan")
+    action_receipts = relationship("SyncActionReceipt", back_populates="device", cascade="all, delete-orphan")
+    conflicts = relationship("SyncConflict", back_populates="device", cascade="all, delete-orphan")
 
 
 class NotificationDeliveryLog(Base):
@@ -1134,6 +1146,111 @@ class HandoverAttachment(Base):
     encounter = relationship("EmergencyEncounter", back_populates="attachments")
     handover = relationship("DigitalHandoverRecord", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_user_id])
+
+
+# ==============================================================================
+# Milestone 9 — Offline-First Synchronization & Resilient Field Operations
+# ==============================================================================
+
+
+class SyncBatchReceipt(Base):
+    """
+    Tracks a submitted batch of queued offline synchronization actions.
+    Records overall batch metrics and processing duration.
+    """
+    __tablename__ = "sync_batch_receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_uuid = Column(String(64), unique=True, nullable=False, index=True)
+    device_id = Column(Integer, ForeignKey("device_registrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    total_actions = Column(Integer, nullable=False, default=0)
+    accepted_actions = Column(Integer, nullable=False, default=0)
+    failed_actions = Column(Integer, nullable=False, default=0)
+    conflict_actions = Column(Integer, nullable=False, default=0)
+    server_receipt_timestamp = Column(DateTime, default=utc_now, nullable=False)
+    processing_time_ms = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    device = relationship("DeviceRegistration", back_populates="sync_batches")
+    user = relationship("User", foreign_keys=[user_id])
+    actions = relationship("SyncActionReceipt", back_populates="batch")
+
+
+class SyncActionReceipt(Base):
+    """
+    Individual idempotent receipt for an action processed via sync upload.
+    Enforces client_action_id deduplication and stores the authoritative result.
+    """
+    __tablename__ = "sync_action_receipts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action_uuid = Column(String(64), unique=True, nullable=False, index=True)
+    batch_id = Column(Integer, ForeignKey("sync_batch_receipts.id", ondelete="SET NULL"), nullable=True, index=True)
+    device_id = Column(Integer, ForeignKey("device_registrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    action_type = Column(String(60), nullable=False)
+    mission_id = Column(Integer, nullable=True, index=True)
+    encounter_id = Column(Integer, nullable=True, index=True)
+    client_timestamp = Column(DateTime, nullable=False)
+    server_receipt_timestamp = Column(DateTime, default=utc_now, nullable=False)
+    status = Column(String(40), nullable=False)  # ACKNOWLEDGED, PERMANENT_FAILURE, RETRYABLE_FAILURE, CONFLICT
+    server_ack_id = Column(String(64), unique=True, nullable=False, index=True)
+    payload_hash = Column(String(64), nullable=False)
+    response_payload_json = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    device = relationship("DeviceRegistration", back_populates="action_receipts")
+    user = relationship("User", foreign_keys=[user_id])
+    batch = relationship("SyncBatchReceipt", back_populates="actions")
+
+
+class SyncConflict(Base):
+    """
+    Records a state conflict between device-side action and authoritative server state.
+    Provides structured data for operational review or automatic resolution.
+    """
+    __tablename__ = "sync_conflicts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conflict_token = Column(String(64), unique=True, nullable=False, index=True)
+    action_uuid = Column(String(64), nullable=False, index=True)
+    device_id = Column(Integer, ForeignKey("device_registrations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    mission_id = Column(Integer, nullable=True, index=True)
+    encounter_id = Column(Integer, nullable=True, index=True)
+    conflict_category = Column(String(40), nullable=False)  # MISSION_STATE, CLINICAL, ASSIGNMENT, TELEMETRY, DESTINATION
+    reason = Column(Text, nullable=False)
+    client_state_json = Column(Text, nullable=False)
+    server_state_json = Column(Text, nullable=False)
+    resolution_status = Column(String(30), nullable=False, default="PENDING")  # PENDING, RESOLVED_SERVER, RESOLVED_CLIENT, DISCARDED
+    resolution_notes = Column(Text, nullable=True)
+    resolved_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    device = relationship("DeviceRegistration", back_populates="conflicts")
+    user = relationship("User", foreign_keys=[user_id])
+    resolved_by = relationship("User", foreign_keys=[resolved_by_user_id])
+
+
+class SyncAuditEvent(Base):
+    """
+    Immutable audit trail for synchronization events, security anomalies, and device revocations.
+    """
+    __tablename__ = "sync_audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(Integer, ForeignKey("device_registrations.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(60), nullable=False)  # DEVICE_REGISTERED, DEVICE_REVOKED, BATCH_UPLOADED, CONFLICT_DETECTED, CONFLICT_RESOLVED, CURSOR_ADVANCED, ANOMALY_DETECTED
+    details_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    device = relationship("DeviceRegistration", foreign_keys=[device_id])
+    user = relationship("User", foreign_keys=[user_id])
+
 
 
 

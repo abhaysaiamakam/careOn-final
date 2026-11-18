@@ -79,6 +79,7 @@ from app.routers.dispatch import router as dispatch_router
 from app.routers.responder_ops import router as responder_ops_router
 from app.routers.hospital_coordination import router as hospital_coordination_router
 from app.routers.clinical_handover import router as clinical_handover_router
+from app.routers.sync import router as sync_router
 
 
 @asynccontextmanager
@@ -183,6 +184,9 @@ app.include_router(hospital_coordination_router)
 
 # Milestone 8 Router: Digital Patient Handover & Clinical Information Continuity
 app.include_router(clinical_handover_router)
+
+# Milestone 9 Router: Offline-First Synchronization & Resilient Field Operations
+app.include_router(sync_router)
 
 
 # ==============================================================================

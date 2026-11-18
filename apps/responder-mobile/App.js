@@ -13,6 +13,8 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { mobileApi } from './src/services/api';
 import { secureStorage } from './src/services/secureStore';
+import { actionJournal } from './src/services/actionJournal';
+import { syncEngine } from './src/services/syncEngine';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -36,6 +38,7 @@ export default function App() {
       }
       setIsAuthenticated(true);
       await loadProfile();
+      syncEngine.start();
     } catch (err) {
       Alert.alert('Login Failed', err.message);
     } finally {
@@ -57,13 +60,31 @@ export default function App() {
     if (!activeMission) return;
     try {
       setLoading(true);
-      const res = await mobileApi.updateStatus(activeMission.id, newStatus);
-      if (newStatus === 'Completed') {
-        setActiveMission(null);
-      } else {
-        setActiveMission(res);
+      // Durably record action first to survive crashes/restarts
+      const act = await actionJournal.recordAction({
+        actionType: 'MISSION_STATUS_CHANGE',
+        missionId: activeMission.id,
+        payload: { status: newStatus },
+      });
+
+      try {
+        const res = await mobileApi.updateStatus(activeMission.id, newStatus);
+        await actionJournal.markAcknowledged(act.actionUuid, `srv_${Date.now()}`);
+        if (newStatus === 'Completed') {
+          setActiveMission(null);
+        } else {
+          setActiveMission(res);
+        }
+        Alert.alert('Status Updated', `Mission is now: ${newStatus}`);
+      } catch (netErr) {
+        // Offline or connection failure: action is safely preserved in durable journal
+        console.warn('Offline mode: action queued in journal:', netErr.message);
+        setActiveMission((prev) => (prev ? { ...prev, status: newStatus } : null));
+        Alert.alert(
+          'Saved Offline',
+          `Mission status updated to "${newStatus}" locally. Will synchronize automatically when connectivity is restored.`
+        );
       }
-      Alert.alert('Status Updated', `Mission is now: ${newStatus}`);
     } catch (err) {
       Alert.alert('Update Failed', err.message);
     } finally {
@@ -72,6 +93,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    syncEngine.stop();
     await secureStorage.clearTokens();
     mobileApi.setAccessToken(null);
     setIsAuthenticated(false);
