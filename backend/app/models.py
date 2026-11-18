@@ -1252,6 +1252,212 @@ class SyncAuditEvent(Base):
     user = relationship("User", foreign_keys=[user_id])
 
 
+# ==============================================================================
+# Milestone 10 — Predictive Emergency Intelligence & Resource Positioning
+# ==============================================================================
+
+class DemandForecastRecord(Base):
+    """
+    Persisted operational demand forecasts across configurable horizons (1h, 3h, 6h, 12h, 24h).
+    Captures expected incident frequency, Poisson confidence intervals, contributing factors,
+    and model provenance.
+    """
+    __tablename__ = "demand_forecast_records"
+    __table_args__ = (
+        Index("ix_forecast_zone_time", "zone_or_region", "start_time", "end_time"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    forecast_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    zone_or_region = Column(String(100), nullable=False, index=True)
+    horizon_hours = Column(Integer, nullable=False)  # 1, 3, 6, 12, 24
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+    expected_incidents = Column(Float, nullable=False)
+    confidence_lower = Column(Float, nullable=False)
+    confidence_upper = Column(Float, nullable=False)
+    confidence_level = Column(String(30), nullable=False, default="MEDIUM")  # HIGH, MEDIUM, LOW, INSUFFICIENT_DATA
+    category_breakdown_json = Column(Text, nullable=True)
+    model_id = Column(String(64), nullable=False)
+    model_version = Column(String(32), nullable=False)
+    historical_sample_size = Column(Integer, nullable=False, default=0)
+    data_freshness_seconds = Column(Float, nullable=False, default=0.0)
+    contributing_factors_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    organization = relationship("Organization")
+
+
+class PredictiveModelRegistry(Base):
+    """
+    Model catalog and performance registry tracking active production and candidate models.
+    Supports controlled activation: candidate models only activate if they outperform baseline.
+    """
+    __tablename__ = "predictive_model_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_id = Column(String(64), unique=True, index=True, nullable=False)
+    model_name = Column(String(120), nullable=False)
+    model_type = Column(String(50), nullable=False)  # rolling_average, seasonal_baseline, seasonal_naive, poisson_regression
+    version = Column(String(32), nullable=False)
+    is_active = Column(Boolean, default=False, nullable=False)
+    feature_schema_version = Column(String(20), nullable=False, default="v1.0")
+    training_start = Column(DateTime, nullable=True)
+    training_end = Column(DateTime, nullable=True)
+    sample_count = Column(Integer, default=0, nullable=False)
+    mae = Column(Float, nullable=True)
+    rmse = Column(Float, nullable=True)
+    forecast_bias = Column(Float, nullable=True)
+    poisson_deviance = Column(Float, nullable=True)
+    parameters_json = Column(Text, nullable=True)
+    status = Column(String(30), default="CANDIDATE", nullable=False)  # ACTIVE, CANDIDATE, DEGRADED, RETIRED
+    last_evaluated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+
+class ModelEvaluationLog(Base):
+    """
+    Chronological validation log evaluating forecasting performance against seasonal baseline.
+    """
+    __tablename__ = "model_evaluation_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    log_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    model_id = Column(String(64), nullable=False, index=True)
+    model_version = Column(String(32), nullable=False)
+    evaluation_dataset_start = Column(DateTime, nullable=True)
+    evaluation_dataset_end = Column(DateTime, nullable=True)
+    sample_count = Column(Integer, default=0, nullable=False)
+    mae = Column(Float, nullable=False)
+    rmse = Column(Float, nullable=False)
+    forecast_bias = Column(Float, nullable=False)
+    poisson_deviance = Column(Float, nullable=True)
+    baseline_mae = Column(Float, nullable=False)
+    baseline_rmse = Column(Float, nullable=False)
+    outperformed_baseline = Column(Boolean, default=False, nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+
+class PositioningRecommendation(Base):
+    """
+    Strategic ambulance pre-positioning recommendation.
+    Subject to mandatory human dispatcher review and approval before execution.
+    """
+    __tablename__ = "positioning_recommendations"
+    __table_args__ = (
+        Index("ix_recommendation_status_expires", "status", "expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    recommendation_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    target_area = Column(String(120), nullable=False)
+    target_latitude = Column(Float, nullable=False)
+    target_longitude = Column(Float, nullable=False)
+    target_geom = Column(SpatialPoint, nullable=True)
+    resource_id = Column(Integer, ForeignKey("resources.id", ondelete="CASCADE"), nullable=False, index=True)
+    current_latitude = Column(Float, nullable=False)
+    current_longitude = Column(Float, nullable=False)
+    proposed_latitude = Column(Float, nullable=False)
+    proposed_longitude = Column(Float, nullable=False)
+    proposed_staging_geom = Column(SpatialPoint, nullable=True)
+    proposed_staging_name = Column(String(200), nullable=False)
+    status = Column(String(40), default="PENDING_REVIEW", nullable=False, index=True)
+    expected_coverage_improvement = Column(Float, nullable=False, default=0.0)
+    estimated_travel_time_minutes = Column(Float, nullable=False, default=0.0)
+    demand_forecast_summary_json = Column(Text, nullable=True)
+    alternative_resource_ids_json = Column(Text, nullable=True)
+    confidence_level = Column(String(20), nullable=False, default="MEDIUM")
+    explanation = Column(Text, nullable=False)
+    reviewed_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    modification_notes = Column(Text, nullable=True)
+    execution_requested_at = Column(DateTime, nullable=True)
+    execution_status = Column(String(40), nullable=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    model_id = Column(String(64), nullable=True)
+    model_version = Column(String(32), nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    organization = relationship("Organization")
+    resource = relationship("Resource")
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_user_id])
+    audit_logs = relationship("PositioningAuditLog", back_populates="recommendation", cascade="all, delete-orphan")
+
+
+class PositioningAuditLog(Base):
+    """
+    Immutable governance and decision audit log for ambulance positioning recommendations.
+    """
+    __tablename__ = "positioning_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    log_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    recommendation_id = Column(Integer, ForeignKey("positioning_recommendations.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action = Column(String(50), nullable=False)
+    previous_status = Column(String(40), nullable=True)
+    new_status = Column(String(40), nullable=False)
+    details_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    recommendation = relationship("PositioningRecommendation", back_populates="audit_logs")
+    actor = relationship("User", foreign_keys=[actor_id])
+
+
+class ScenarioSimulationRecord(Base):
+    """
+    Isolated operational scenario simulation record.
+    Never mutates live missions, live assignments, hospital reservations, or clinical data.
+    """
+    __tablename__ = "scenario_simulation_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    simulation_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    scenario_type = Column(String(60), nullable=False)  # BASELINE_NORMAL, REGIONAL_DEMAND_SURGE, MASS_CASUALTY_EVENT, RESOURCE_SHORTAGE, HOSPITAL_DIVERSION
+    scenario_name = Column(String(150), nullable=False)
+    parameters_json = Column(Text, nullable=False)
+    results_summary_json = Column(Text, nullable=False)
+    coverage_impact_json = Column(Text, nullable=False)
+    bottleneck_alerts_json = Column(Text, nullable=False)
+    simulated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    organization = relationship("Organization")
+    simulated_by = relationship("User", foreign_keys=[simulated_by_user_id])
+
+
+class CoverageSnapshotRecord(Base):
+    """
+    Periodic regional coverage snapshot calculating operational resource density vs forecasted demand.
+    """
+    __tablename__ = "coverage_snapshot_records"
+    __table_args__ = (
+        Index("ix_coverage_zone_created", "zone_or_region", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    zone_or_region = Column(String(100), nullable=False, index=True)
+    operational_resources_count = Column(Integer, nullable=False, default=0)
+    available_resources_count = Column(Integer, nullable=False, default=0)
+    forecasted_demand = Column(Float, nullable=False, default=0.0)
+    coverage_ratio = Column(Float, nullable=False, default=0.0)
+    avg_travel_time_minutes = Column(Float, nullable=False, default=0.0)
+    is_gap = Column(Boolean, nullable=False, default=False)
+    threshold_travel_time_minutes = Column(Float, nullable=False, default=15.0)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    organization = relationship("Organization")
+
+
+
 
 
 

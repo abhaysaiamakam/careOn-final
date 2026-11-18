@@ -1510,6 +1510,247 @@ class SyncConflictReconcileRequest(BaseModel):
     notes: Optional[str] = None
 
 
+# ==============================================================================
+# Milestone 10 — Predictive Emergency Intelligence & Resource Positioning Schemas
+# ==============================================================================
+
+class HourlyDemandPattern(BaseModel):
+    hour: int = Field(..., ge=0, le=23)
+    incident_count: int
+    incident_share_pct: float
+
+
+class WeekdayDemandPattern(BaseModel):
+    day_of_week: int = Field(..., ge=0, le=6)
+    day_name: str
+    incident_count: int
+    incident_share_pct: float
+
+
+class CategoryBreakdownItem(BaseModel):
+    category: str
+    count: int
+    percentage: float
+
+
+class SeverityBreakdownItem(BaseModel):
+    priority: str
+    count: int
+    percentage: float
+
+
+class DemandAnalyticsResponse(BaseModel):
+    total_valid_incidents: int
+    excluded_incidents_count: int
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    hourly_patterns: List[HourlyDemandPattern]
+    weekday_patterns: List[WeekdayDemandPattern]
+    category_breakdown: List[CategoryBreakdownItem]
+    severity_breakdown: List[SeverityBreakdownItem]
+    monthly_trend: List[Dict[str, Any]]
+    data_freshness_seconds: float
+
+
+class HotspotAnalysisRequest(BaseModel):
+    days: int = Field(30, ge=1, le=365)
+    grid_size_km: float = Field(1.0, ge=0.1, le=20.0)
+    min_incidents: int = Field(2, ge=1)
+
+
+class HotspotCluster(BaseModel):
+    cluster_id: int
+    centroid_latitude: float
+    centroid_longitude: float
+    incident_count: int
+    incident_density_per_sq_km: float
+    average_response_time_minutes: float
+    is_coverage_gap: bool
+    risk_tier: str  # LOW, MODERATE, HIGH, CRITICAL, STATISTICALLY_INSUFFICIENT
+
+
+class HotspotAnalysisResponse(BaseModel):
+    analyzed_incidents: int
+    clusters: List[HotspotCluster]
+    underserved_areas: List[str]
+    grid_resolution_km: float
+    generated_at: datetime
+
+
+class ForecastGenerateRequest(BaseModel):
+    zone_or_region: str = Field(..., min_length=2, max_length=100)
+    horizon_hours: int = Field(3, description="1, 3, 6, 12, or 24 hours")
+    model_id: Optional[str] = None
+
+
+class ForecastResponse(BaseModel):
+    forecast_uuid: str
+    zone_or_region: str
+    horizon_hours: int
+    start_time: datetime
+    end_time: datetime
+    expected_incidents: float
+    confidence_lower: float
+    confidence_upper: float
+    confidence_level: str  # HIGH, MEDIUM, LOW, INSUFFICIENT_DATA
+    category_breakdown: Dict[str, float]
+    model_id: str
+    model_version: str
+    historical_sample_size: int
+    data_freshness_seconds: float
+    contributing_factors: List[str]
+    created_at: datetime
+
+
+class CoverageAnalysisRequest(BaseModel):
+    zone_or_region: Optional[str] = None
+    response_threshold_minutes: float = Field(15.0, ge=1.0, le=60.0)
+
+
+class ZoneCoverageResponse(BaseModel):
+    zone_or_region: str
+    operational_resources_count: int
+    available_resources_count: int
+    occupied_resources_count: int
+    stale_gps_resources_count: int
+    forecasted_demand_next_3h: float
+    coverage_ratio: float
+    avg_travel_time_minutes: float
+    is_coverage_gap: bool
+    nearest_available_resource_code: Optional[str] = None
+    nearest_travel_time_minutes: Optional[float] = None
+    routing_source: str
+
+
+class PositioningRecommendRequest(BaseModel):
+    target_area: Optional[str] = None
+    max_recommendations: int = Field(3, ge=1, le=10)
+
+
+class PositioningRecommendationResponse(BaseModel):
+    id: int
+    recommendation_uuid: str
+    target_area: str
+    target_latitude: float
+    target_longitude: float
+    resource_id: int
+    resource_code: Optional[str] = None
+    current_latitude: float
+    current_longitude: float
+    proposed_latitude: float
+    proposed_longitude: float
+    proposed_staging_name: str
+    status: str
+    expected_coverage_improvement: float
+    estimated_travel_time_minutes: float
+    confidence_level: str
+    explanation: str
+    alternative_resources: List[Dict[str, Any]]
+    expires_at: datetime
+    reviewed_by_user_id: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    modification_notes: Optional[str] = None
+    execution_status: Optional[str] = None
+    model_id: Optional[str] = None
+    model_version: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PositioningRecommendationReviewRequest(BaseModel):
+    notes: Optional[str] = None
+
+
+class PositioningRecommendationRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
+class PositioningRecommendationModifyRequest(BaseModel):
+    proposed_latitude: Optional[float] = None
+    proposed_longitude: Optional[float] = None
+    proposed_staging_name: Optional[str] = None
+    resource_id: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class PositioningExecutionRequest(BaseModel):
+    execution_action: str = Field("DISPATCH_RELOCATION", description="DISPATCH_RELOCATION or CANCEL")
+    notes: Optional[str] = None
+
+
+class ScenarioSimulationRequest(BaseModel):
+    scenario_type: str = Field(..., description="BASELINE_NORMAL, REGIONAL_DEMAND_SURGE, MASS_CASUALTY_EVENT, RESOURCE_SHORTAGE, HOSPITAL_DIVERSION")
+    scenario_name: Optional[str] = None
+    target_zone: Optional[str] = None
+    surge_factor: Optional[float] = Field(1.0, ge=0.1, le=10.0)
+    unavailable_resource_ids: Optional[List[int]] = []
+    diverted_hospital_ids: Optional[List[int]] = []
+
+
+class ScenarioSimulationResponse(BaseModel):
+    simulation_uuid: str
+    scenario_type: str
+    scenario_name: str
+    baseline_expected_demand: float
+    simulated_demand: float
+    operational_resources_count: int
+    available_resources_count: int
+    response_time_impact_minutes: float
+    coverage_gaps_identified: List[str]
+    bottleneck_alerts: List[str]
+    recommended_positioning_actions: List[Dict[str, Any]]
+    created_at: datetime
+
+
+class ModelRegistryResponse(BaseModel):
+    model_id: str
+    model_name: str
+    model_type: str
+    version: str
+    is_active: bool
+    status: str
+    sample_count: int
+    mae: Optional[float] = None
+    rmse: Optional[float] = None
+    forecast_bias: Optional[float] = None
+    poisson_deviance: Optional[float] = None
+    last_evaluated_at: Optional[datetime] = None
+
+
+class ModelEvaluationRequest(BaseModel):
+    candidate_model_id: str
+    validation_days: int = Field(14, ge=1, le=180)
+
+
+class ModelEvaluationResponse(BaseModel):
+    model_id: str
+    model_version: str
+    sample_count: int
+    mae: float
+    rmse: float
+    forecast_bias: float
+    poisson_deviance: Optional[float] = None
+    baseline_mae: float
+    baseline_rmse: float
+    outperformed_baseline: bool
+    can_activate: bool
+    recommendation: str
+
+
+class ModelHealthResponse(BaseModel):
+    active_model_id: str
+    active_model_version: str
+    status: str
+    is_degraded: bool
+    data_freshness_seconds: float
+    historical_sample_count: int
+    fallback_active: bool
+    alerts: List[str]
+
+
+
 
 
 
