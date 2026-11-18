@@ -71,6 +71,9 @@ from app.models import make_point_wkt
 from app.routers.auth import router as auth_router
 from app.routers.identity import router as identity_router
 from app.routers.organizations import router as organizations_router
+from app.routers.responder import router as responder_router
+from app.routers.hospital import router as hospital_router
+from app.routers.super_admin import router as super_admin_router
 
 
 @asynccontextmanager
@@ -142,6 +145,11 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(identity_router)
 app.include_router(organizations_router)
+
+# Milestone 3 Routers: Five-Application Ecosystem (Responder, Hospital, Super Admin)
+app.include_router(responder_router)
+app.include_router(hospital_router)
+app.include_router(super_admin_router)
 
 
 # ==============================================================================

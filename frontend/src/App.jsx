@@ -3,6 +3,10 @@ import Header from './components/Header';
 import Footer from './components/Footer';
 import SaharaChatbot from './components/SaharaChatbot';
 import NotificationDrawer from './components/NotificationDrawer';
+import PortalBar from './apps/portal/PortalBar';
+import ResponderApp from './apps/responder/ResponderApp';
+import HospitalApp from './apps/hospital/HospitalApp';
+import SuperAdminApp from './apps/super-admin/SuperAdminApp';
 
 // Pages
 import Home from './pages/Home';
@@ -29,6 +33,9 @@ import './App.css';
 
 // Helper to determine initial tab from URL path
 function getTabFromPath(pathname) {
+  if (pathname.startsWith('/responder')) return 'responder';
+  if (pathname.startsWith('/hospital')) return 'hospital';
+  if (pathname.startsWith('/super-admin') || pathname === '/admin/root') return 'super_admin';
   if (pathname === '/user/login') return 'user_login';
   if (pathname === '/user/register') return 'user_register';
   if (pathname === '/user/dashboard' || pathname === '/user/history') return 'user_dashboard';
@@ -42,6 +49,9 @@ function getTabFromPath(pathname) {
 
 function getPathFromTab(tab) {
   switch (tab) {
+    case 'responder': return '/responder';
+    case 'hospital': return '/hospital';
+    case 'super_admin': return '/super-admin';
     case 'user_login': return '/user/login';
     case 'user_register': return '/user/register';
     case 'user_dashboard': return '/user/dashboard';
@@ -162,8 +172,27 @@ export default function App() {
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
+  const currentApp = (() => {
+    if (currentTab === 'responder') return 'responder';
+    if (currentTab === 'hospital') return 'hospital';
+    if (currentTab === 'super_admin') return 'super_admin';
+    if (currentTab.startsWith('admin')) return 'dispatcher';
+    return 'citizen';
+  })();
+
+  const handleSelectApp = (appId) => {
+    if (appId === 'citizen') handleNavigate('home');
+    else if (appId === 'dispatcher') handleNavigate('admin_dashboard');
+    else if (appId === 'responder') handleNavigate('responder');
+    else if (appId === 'hospital') handleNavigate('hospital');
+    else if (appId === 'super_admin') handleNavigate('super_admin');
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* Ecosystem Portal Switcher Bar */}
+      <PortalBar currentApp={currentApp} onSelectApp={handleSelectApp} />
+
       <Header
         health={health}
         onRefresh={loadSystemData}
@@ -180,6 +209,21 @@ export default function App() {
       />
 
       <main className="container" style={{ flex: 1, padding: '1rem 0' }}>
+        {/* Responder Application */}
+        {currentTab === 'responder' && (
+          <ResponderApp />
+        )}
+
+        {/* Hospital Emergency Portal */}
+        {currentTab === 'hospital' && (
+          <HospitalApp />
+        )}
+
+        {/* Super Admin Console */}
+        {currentTab === 'super_admin' && (
+          <SuperAdminApp />
+        )}
+
         {/* Public Home */}
         {currentTab === 'home' && (
           <Home lang={lang} onNavigate={handleNavigate} />

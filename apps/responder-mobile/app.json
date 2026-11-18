@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "CareOn Responder",
+    "slug": "careon-responder",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090d16"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.careon.responder",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "CareOn requires GPS access to route emergency responders to active incident scenes.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "CareOn shares responder telemetry with the dispatch console to ensure rapid coordination."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#090d16"
+      },
+      "package": "org.careon.responder",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    }
+  }
+}

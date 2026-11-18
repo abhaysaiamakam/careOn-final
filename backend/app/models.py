@@ -210,9 +210,11 @@ class Resource(Base):
     capacity = Column(Integer, nullable=False, default=1)
     contact_phone = Column(String(30), nullable=False)
     current_assignment_id = Column(Integer, nullable=True)
+    assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     last_updated = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     assignments = relationship("Assignment", back_populates="resource")
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
 
 
 class Assignment(Base):
@@ -441,6 +443,7 @@ class Organization(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     memberships = relationship("OrganizationMembership", back_populates="organization", cascade="all, delete-orphan")
+    readiness = relationship("HospitalReadiness", back_populates="organization", uselist=False, cascade="all, delete-orphan")
 
 
 class OrganizationMembership(Base):
@@ -462,4 +465,34 @@ class OrganizationMembership(Base):
 
     organization = relationship("Organization", back_populates="memberships")
     user = relationship("User", back_populates="organization_memberships", foreign_keys=[user_id])
+
+
+# ==============================================================================
+# Milestone 3 — Hospital Readiness & Field Capacity Model
+# ==============================================================================
+class HospitalReadiness(Base):
+    """
+    Real-time hospital capacity, emergency department status, and diversion tracking.
+    Enforces M2 organization isolation: each hospital org has one readiness record.
+    """
+    __tablename__ = "hospital_readiness"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    total_er_beds = Column(Integer, nullable=False, default=20)
+    available_er_beds = Column(Integer, nullable=False, default=15)
+    icu_beds_total = Column(Integer, nullable=False, default=8)
+    icu_beds_available = Column(Integer, nullable=False, default=4)
+    trauma_bays_total = Column(Integer, nullable=False, default=4)
+    trauma_bays_available = Column(Integer, nullable=False, default=2)
+    operating_rooms_total = Column(Integer, nullable=False, default=3)
+    operating_rooms_available = Column(Integer, nullable=False, default=1)
+    divert_status = Column(Boolean, default=False, nullable=False)
+    divert_reason = Column(String(255), nullable=True)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    organization = relationship("Organization", back_populates="readiness")
+    updated_by_user = relationship("User", foreign_keys=[updated_by_user_id])
+
 

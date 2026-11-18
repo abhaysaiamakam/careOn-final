@@ -520,3 +520,126 @@ class SessionResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+# ==============================================================================
+# Milestone 3 — Five-Application Ecosystem Schemas
+# ==============================================================================
+
+class MissionResponse(BaseModel):
+    id: int  # Assignment ID
+    incident_id: int
+    incident_code: str
+    category: str
+    priority: str
+    title: str
+    description: str
+    location_name: str
+    latitude: float
+    longitude: float
+    affected_people: int
+    help_required: str
+    status: str
+    incident_status: str
+    assigned_at: datetime
+    resource_id: int
+    resource_code: str
+    resource_name: str
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MissionActionRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class MissionStatusUpdate(BaseModel):
+    status: str = Field(..., description="Accepted, En Route, On Scene, Transporting, Arrived Hospital, Cleared, Completed")
+    notes: Optional[str] = None
+
+
+class ResponderTelemetryUpdate(BaseModel):
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    heading: Optional[float] = None
+    speed: Optional[float] = None
+
+
+class HospitalReadinessUpdate(BaseModel):
+    total_er_beds: Optional[int] = Field(default=None, ge=0)
+    available_er_beds: Optional[int] = Field(default=None, ge=0)
+    icu_beds_total: Optional[int] = Field(default=None, ge=0)
+    icu_beds_available: Optional[int] = Field(default=None, ge=0)
+    trauma_bays_total: Optional[int] = Field(default=None, ge=0)
+    trauma_bays_available: Optional[int] = Field(default=None, ge=0)
+    operating_rooms_total: Optional[int] = Field(default=None, ge=0)
+    operating_rooms_available: Optional[int] = Field(default=None, ge=0)
+    divert_status: Optional[bool] = None
+    divert_reason: Optional[str] = None
+
+
+class HospitalReadinessResponse(BaseModel):
+    id: int
+    organization_id: int
+    organization_name: Optional[str] = None
+    total_er_beds: int
+    available_er_beds: int
+    icu_beds_total: int
+    icu_beds_available: int
+    trauma_bays_total: int
+    trauma_bays_available: int
+    operating_rooms_total: int
+    operating_rooms_available: int
+    divert_status: bool
+    divert_reason: Optional[str] = None
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncomingPatientResponse(BaseModel):
+    incident_id: int
+    incident_code: str
+    category: str
+    priority: str
+    affected_people: int
+    location_name: str
+    transport_status: str
+    resource_name: Optional[str] = None
+    resource_code: Optional[str] = None
+    eta_minutes: Optional[int] = None
+    notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PatientArrivalAcknowledge(BaseModel):
+    bed_type: Optional[str] = Field(default="er_bed", description="er_bed, icu_bed, trauma_bay, operating_room")
+    intake_notes: Optional[str] = None
+
+
+class AuditLogQueryResponse(BaseModel):
+    id: int
+    action: str
+    entity_type: str
+    entity_id: str
+    actor: str
+    details: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SystemHealthResponse(BaseModel):
+    status: str
+    database_connected: bool
+    postgis_available: bool
+    redis_connected: bool
+    active_incidents: int
+    available_resources: int
+    total_users: int
+    total_organizations: int
+    audit_log_count: int
+    timestamp: datetime
+
+
