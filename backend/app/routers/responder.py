@@ -194,6 +194,28 @@ def accept_mission(
     db.add(audit)
     db.commit()
     db.refresh(assignment)
+
+    try:
+        from app.realtime.event_publisher import record_and_publish_event
+        from app.realtime.event_models import EventTypes
+        record_and_publish_event(
+            db=db,
+            event_type=EventTypes.RESPONDER_MISSION_ACCEPTED,
+            payload={
+                "assignment_id": assignment.id,
+                "incident_id": assignment.incident_id,
+                "incident_code": assignment.incident.incident_code,
+                "resource_id": assignment.resource_id,
+                "resource_name": assignment.resource.name if assignment.resource else "Unit",
+                "status": assignment.status,
+                "responder_name": user.name,
+            },
+            incident_id=assignment.incident_id,
+            actor_id=user.id,
+        )
+    except Exception as exc:
+        pass
+
     return _build_mission_response(assignment)
 
 
@@ -232,6 +254,7 @@ def reject_mission(
     )
     db.add(inc_update)
 
+    # Log audit entry in reject_mission
     audit = AuditLog(
         action="MISSION_REJECT",
         entity_type="assignment",
@@ -242,6 +265,27 @@ def reject_mission(
     db.add(audit)
     db.commit()
     db.refresh(assignment)
+
+    try:
+        from app.realtime.event_publisher import record_and_publish_event
+        from app.realtime.event_models import EventTypes
+        record_and_publish_event(
+            db=db,
+            event_type=EventTypes.RESPONDER_MISSION_REJECTED,
+            payload={
+                "assignment_id": assignment.id,
+                "incident_id": incident.id,
+                "incident_code": incident.incident_code,
+                "resource_id": assignment.resource_id,
+                "reason": reason,
+                "responder_name": user.name,
+            },
+            incident_id=incident.id,
+            actor_id=user.id,
+        )
+    except Exception as exc:
+        pass
+
     return _build_mission_response(assignment)
 
 
@@ -299,6 +343,7 @@ def update_mission_status(
     )
     db.add(inc_update)
 
+    # Log audit entry in update_mission_status
     audit = AuditLog(
         action="MISSION_STATUS_UPDATE",
         entity_type="assignment",
@@ -309,6 +354,36 @@ def update_mission_status(
     db.add(audit)
     db.commit()
     db.refresh(assignment)
+
+    try:
+        from app.realtime.event_publisher import record_and_publish_event
+        from app.realtime.event_models import EventTypes
+        ev_type = EventTypes.RESPONDER_STATUS_CHANGED
+        if new_status.lower() in ("on scene", "onscene", "arrived"):
+            ev_type = EventTypes.RESPONDER_ARRIVED_AT_INCIDENT
+        elif new_status.lower() in ("transporting", "en route to hospital"):
+            ev_type = EventTypes.RESPONDER_PATIENT_PICKED_UP
+        elif new_status.lower() in ("arrived hospital", "at hospital"):
+            ev_type = EventTypes.RESPONDER_ARRIVED_AT_HOSPITAL
+
+        record_and_publish_event(
+            db=db,
+            event_type=ev_type,
+            payload={
+                "assignment_id": assignment.id,
+                "incident_id": incident.id,
+                "incident_code": incident.incident_code,
+                "status": assignment.status,
+                "incident_status": incident.status,
+                "responder_name": user.name,
+                "notes": assignment.notes,
+            },
+            incident_id=incident.id,
+            actor_id=user.id,
+        )
+    except Exception as exc:
+        pass
+
     return _build_mission_response(assignment)
 
 

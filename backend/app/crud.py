@@ -41,6 +41,32 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 
+def _safe_record_event(
+    db: Session,
+    event_type: str,
+    payload: Dict[str, Any],
+    incident_id: Optional[int] = None,
+    organization_id: Optional[int] = None,
+    actor_id: Optional[int] = None,
+    channel: Optional[str] = None,
+):
+    """Safely record an event in the transactional outbox without failing the caller."""
+    try:
+        from app.realtime.event_publisher import record_and_publish_event
+        record_and_publish_event(
+            db=db,
+            event_type=event_type,
+            payload=payload,
+            organization_id=organization_id,
+            incident_id=incident_id,
+            actor_id=actor_id,
+            channel=channel,
+        )
+    except Exception as exc:
+        logger.warning(f"Event publication failed gracefully: {exc}")
+
+
+
 # ==============================================================================
 # Seed Demo Data
 # ==============================================================================
@@ -687,6 +713,28 @@ def create_incident(
     db.commit()
     db.refresh(incident)
 
+    # Publish real-time event via Transactional Outbox
+    _safe_record_event(
+        db=db,
+        event_type="incident.created",
+        payload={
+            "id": incident.id,
+            "incident_code": incident.incident_code,
+            "category": incident.category,
+            "title": incident.title,
+            "location_name": incident.location_name,
+            "latitude": incident.latitude,
+            "longitude": incident.longitude,
+            "priority": incident.priority,
+            "status": incident.status,
+            "affected_people": incident.affected_people,
+            "help_required": incident.help_required,
+            "is_verified": incident.is_verified,
+        },
+        incident_id=incident.id,
+        actor_id=user_id,
+    )
+
     return incident
 
 
@@ -781,6 +829,20 @@ def verify_incident(
 
         db.commit()
         db.refresh(incident)
+
+        _safe_record_event(
+            db=db,
+            event_type="incident.verified",
+            payload={
+                "id": incident.id,
+                "incident_code": incident.incident_code,
+                "status": incident.status,
+                "is_verified": True,
+                "verified_by": verified_by,
+            },
+            incident_id=incident.id,
+        )
+
         return incident
 
     return None
@@ -832,6 +894,20 @@ def update_incident_status(
 
     db.commit()
     db.refresh(incident)
+
+    _safe_record_event(
+        db=db,
+        event_type="incident.resolved" if new_status == "Resolved" else "incident.updated",
+        payload={
+            "id": incident.id,
+            "incident_code": incident.incident_code,
+            "old_status": old_status,
+            "new_status": new_status,
+            "actor": actor,
+        },
+        incident_id=incident.id,
+    )
+
     return incident
 
 
@@ -867,6 +943,21 @@ def update_incident_priority(
 
     db.commit()
     db.refresh(incident)
+
+    _safe_record_event(
+        db=db,
+        event_type="incident.priority_changed",
+        payload={
+            "id": incident.id,
+            "incident_code": incident.incident_code,
+            "old_priority": old_priority,
+            "new_priority": new_priority,
+            "reason": reason,
+            "actor": actor,
+        },
+        incident_id=incident.id,
+    )
+
     return incident
 
 
@@ -933,6 +1024,20 @@ def cancel_incident(
 
     db.commit()
     db.refresh(incident)
+
+    _safe_record_event(
+        db=db,
+        event_type="incident.cancelled",
+        payload={
+            "id": incident.id,
+            "incident_code": incident.incident_code,
+            "status": "Cancelled",
+            "reason": reason,
+            "cancelled_by": cancelled_by,
+        },
+        incident_id=incident.id,
+    )
+
     return incident
 
 
@@ -968,6 +1073,19 @@ def acknowledge_cancellation_and_release(
 
     db.commit()
     db.refresh(incident)
+
+    _safe_record_event(
+        db=db,
+        event_type="incident.updated",
+        payload={
+            "id": incident.id,
+            "incident_code": incident.incident_code,
+            "status": incident.status,
+            "message": "Cancellation acknowledged; resources released.",
+        },
+        incident_id=incident.id,
+    )
+
     return incident
 
 
@@ -1011,6 +1129,20 @@ def resolve_incident(
 
     db.commit()
     db.refresh(incident)
+
+    _safe_record_event(
+        db=db,
+        event_type="incident.resolved",
+        payload={
+            "id": incident.id,
+            "incident_code": incident.incident_code,
+            "status": "Resolved",
+            "actor": actor,
+            "notes": notes,
+        },
+        incident_id=incident.id,
+    )
+
     return incident
 
 
@@ -1149,6 +1281,43 @@ def confirm_assignment(
 
         db.commit()
         db.refresh(assignment)
+
+        _safe_record_event(
+            db=db,
+            event_type="dispatch.assignment_approved",
+            payload={
+                "assignment_id": assignment.id,
+                "incident_id": incident.id,
+                "incident_code": incident.incident_code,
+                "resource_id": resource.id,
+                "resource_code": resource.resource_code,
+                "resource_name": resource.name,
+                "status": assignment.status,
+                "assigned_by": assigned_by,
+                "eta_minutes": eta_mins,
+            },
+            incident_id=incident.id,
+        )
+
+        _safe_record_event(
+            db=db,
+            event_type="responder.mission_assigned",
+            payload={
+                "assignment_id": assignment.id,
+                "incident_id": incident.id,
+                "incident_code": incident.incident_code,
+                "resource_id": resource.id,
+                "resource_code": resource.resource_code,
+                "category": incident.category,
+                "location_name": incident.location_name,
+                "latitude": incident.latitude,
+                "longitude": incident.longitude,
+                "priority": incident.priority,
+            },
+            incident_id=incident.id,
+            actor_id=resource.assigned_user_id,
+        )
+
         return assignment
     except IntegrityError as e:
         db.rollback()

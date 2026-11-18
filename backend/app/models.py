@@ -496,3 +496,37 @@ class HospitalReadiness(Base):
     updated_by_user = relationship("User", foreign_keys=[updated_by_user_id])
 
 
+# ==============================================================================
+# Milestone 4 — Real-Time Transactional Outbox Model
+# ==============================================================================
+class OutboxEvent(Base):
+    """
+    Transactional Outbox pattern for guaranteed event delivery.
+    Critical state mutations commit business data and an OutboxEvent in the same
+    database transaction. An asynchronous or relay publisher then forwards events
+    to Redis Pub/Sub for multi-instance WebSocket distribution.
+    """
+    __tablename__ = "outbox_events"
+    __table_args__ = (
+        Index("ix_outbox_events_unpub", "is_published", "created_at"),
+        Index("ix_outbox_events_channel_created", "channel", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(36), unique=True, index=True, nullable=False)  # UUID
+    event_type = Column(String(64), index=True, nullable=False)
+    event_version = Column(Integer, default=1, nullable=False)
+    occurred_at = Column(DateTime, default=utc_now, nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    channel = Column(String(100), nullable=False, default="careon:events:global", index=True)
+    payload_json = Column(Text, nullable=False)
+    is_published = Column(Boolean, default=False, nullable=False, index=True)
+    published_at = Column(DateTime, nullable=True)
+    retry_count = Column(Integer, default=0, nullable=False)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+
+

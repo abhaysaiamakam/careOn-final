@@ -74,6 +74,7 @@ from app.routers.organizations import router as organizations_router
 from app.routers.responder import router as responder_router
 from app.routers.hospital import router as hospital_router
 from app.routers.super_admin import router as super_admin_router
+from app.realtime import realtime_router, redis_subscriber
 
 
 @asynccontextmanager
@@ -114,7 +115,20 @@ async def lifespan(app: FastAPI):
         _startup_log.warning(f"Demo data seeding skipped or partial: {exc}")
     finally:
         db.close()
+
+    # Milestone 4: Start background Redis Pub/Sub subscriber
+    try:
+        redis_subscriber.start()
+    except Exception as exc:
+        _startup_log.warning(f"Failed to start Redis subscriber at startup: {exc}")
+
     yield
+
+    # Milestone 4: Shutdown Redis Pub/Sub subscriber
+    try:
+        await redis_subscriber.stop()
+    except Exception as exc:
+        _startup_log.warning(f"Error stopping Redis subscriber: {exc}")
 
 
 app = FastAPI(
@@ -150,6 +164,9 @@ app.include_router(organizations_router)
 app.include_router(responder_router)
 app.include_router(hospital_router)
 app.include_router(super_admin_router)
+
+# Milestone 4 Router: Real-time coordination engine (WebSockets, GPS telemetry, Outbox recovery)
+app.include_router(realtime_router)
 
 
 # ==============================================================================

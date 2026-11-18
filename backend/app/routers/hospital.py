@@ -158,6 +158,29 @@ def update_hospital_readiness(
     db.commit()
     db.refresh(readiness)
 
+    try:
+        from app.realtime.event_publisher import record_and_publish_event
+        from app.realtime.event_models import EventTypes, get_org_channel
+        record_and_publish_event(
+            db=db,
+            event_type=EventTypes.HOSPITAL_READINESS_CHANGED,
+            payload={
+                "hospital_id": org.id,
+                "hospital_name": org.name,
+                "available_er_beds": readiness.available_er_beds,
+                "total_er_beds": readiness.total_er_beds,
+                "icu_beds_available": readiness.icu_beds_available,
+                "trauma_bays_available": readiness.trauma_bays_available,
+                "divert_status": readiness.divert_status,
+                "divert_reason": readiness.divert_reason,
+            },
+            organization_id=org.id,
+            actor_id=user.id,
+            channel=get_org_channel(org.id),
+        )
+    except Exception as exc:
+        pass
+
     return HospitalReadinessResponse(
         id=readiness.id,
         organization_id=org.id,
@@ -278,6 +301,28 @@ def acknowledge_patient_arrival(
     )
     db.add(audit)
     db.commit()
+
+    try:
+        from app.realtime.event_publisher import record_and_publish_event
+        from app.realtime.event_models import EventTypes, get_incident_channel
+        record_and_publish_event(
+            db=db,
+            event_type=EventTypes.HOSPITAL_PATIENT_ARRIVAL_CONFIRMED,
+            payload={
+                "incident_id": incident.id,
+                "incident_code": incident.incident_code,
+                "hospital_id": org.id,
+                "hospital_name": org.name,
+                "bed_type": bed_type,
+                "intake_notes": note_txt,
+            },
+            organization_id=org.id,
+            incident_id=incident.id,
+            actor_id=user.id,
+            channel=get_incident_channel(incident.id),
+        )
+    except Exception as exc:
+        pass
 
     return {
         "status": "acknowledged",
