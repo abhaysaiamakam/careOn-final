@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -1086,6 +1086,291 @@ class FacilityReadinessAssessmentResponse(BaseModel):
 class MCIDistributionRequest(BaseModel):
     incident_id: int
     patient_severities: List[str] = Field(..., min_length=1)
+
+
+# ==============================================================================
+# Milestone 8 — Digital Handover & Clinical Information Continuity Schemas
+# ==============================================================================
+
+class PatientCreate(BaseModel):
+    full_name: Optional[str] = None
+    identity_status: str = Field("unknown", description="unknown, provisional, verified")
+    date_of_birth: Optional[date] = None
+    estimated_age: Optional[int] = Field(None, ge=0, le=150)
+    gender: str = Field("unknown", description="male, female, non_binary, unknown")
+    contact_phone: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    blood_group: Optional[str] = None
+    known_allergies: Optional[str] = None
+    known_medical_conditions: Optional[str] = None
+    current_medications: Optional[str] = None
+    history_verification_status: str = Field("unknown", description="patient_reported, family_reported, clinical_verified, unknown")
+
+
+class PatientUpdate(BaseModel):
+    full_name: Optional[str] = None
+    identity_status: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    estimated_age: Optional[int] = None
+    gender: Optional[str] = None
+    contact_phone: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    blood_group: Optional[str] = None
+    known_allergies: Optional[str] = None
+    known_medical_conditions: Optional[str] = None
+    current_medications: Optional[str] = None
+    history_verification_status: Optional[str] = None
+
+
+class PatientResponse(BaseModel):
+    id: int
+    patient_identifier: str
+    full_name: Optional[str] = None
+    identity_status: str
+    date_of_birth: Optional[date] = None
+    estimated_age: Optional[int] = None
+    gender: str
+    contact_phone: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    blood_group: Optional[str] = None
+    known_allergies: Optional[str] = None
+    known_medical_conditions: Optional[str] = None
+    current_medications: Optional[str] = None
+    history_verification_status: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EmergencyEncounterCreate(BaseModel):
+    incident_id: int
+    chief_complaint: str = Field(..., min_length=2, max_length=255)
+    patient_id: Optional[int] = None
+    assignment_id: Optional[int] = None
+    receiving_facility_id: Optional[int] = None
+    initial_acuity: str = Field("High", description="Critical, High, Medium, Low")
+
+
+class EmergencyEncounterResponse(BaseModel):
+    id: int
+    encounter_code: str
+    patient_id: int
+    incident_id: int
+    assignment_id: Optional[int] = None
+    assigned_responder_id: Optional[int] = None
+    receiving_facility_id: Optional[int] = None
+    status: str
+    chief_complaint: str
+    initial_acuity: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ClinicalAssessmentCreate(BaseModel):
+    consciousness_level: str = Field("Alert", description="Alert, Voice, Pain, Unresponsive")
+    airway_status: str = Field("clear", max_length=50)
+    breathing_status: str = Field("normal", max_length=50)
+    circulation_status: str = Field("normal_pulses", max_length=50)
+    presenting_complaints: Optional[str] = None
+    observed_injuries: Optional[str] = None
+    symptoms: Optional[str] = None
+    clinical_notes: Optional[str] = None
+    assessed_at: Optional[datetime] = None
+
+
+class ClinicalAssessmentResponse(BaseModel):
+    id: int
+    encounter_id: int
+    responder_id: Optional[int] = None
+    assessed_at: datetime
+    consciousness_level: str
+    airway_status: str
+    breathing_status: str
+    circulation_status: str
+    presenting_complaints: Optional[str] = None
+    observed_injuries: Optional[str] = None
+    symptoms: Optional[str] = None
+    clinical_notes: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VitalSignObservationCreate(BaseModel):
+    heart_rate: Optional[int] = Field(None, ge=0, le=300)
+    systolic_bp: Optional[int] = Field(None, ge=0, le=300)
+    diastolic_bp: Optional[int] = Field(None, ge=0, le=200)
+    respiratory_rate: Optional[int] = Field(None, ge=0, le=100)
+    oxygen_saturation: Optional[float] = Field(None, ge=0.0, le=100.0)
+    body_temperature: Optional[float] = Field(None, ge=20.0, le=45.0)
+    blood_glucose: Optional[float] = Field(None, ge=0.0, le=1500.0)
+    gcs_eye: Optional[int] = Field(None, ge=1, le=4)
+    gcs_verbal: Optional[int] = Field(None, ge=1, le=5)
+    gcs_motor: Optional[int] = Field(None, ge=1, le=6)
+    measurement_source: str = Field("manual", max_length=50)
+    observed_at: Optional[datetime] = None
+
+
+class VitalSignObservationResponse(BaseModel):
+    id: int
+    encounter_id: int
+    recorded_by_user_id: Optional[int] = None
+    observed_at: datetime
+    heart_rate: Optional[int] = None
+    systolic_bp: Optional[int] = None
+    diastolic_bp: Optional[int] = None
+    respiratory_rate: Optional[int] = None
+    oxygen_saturation: Optional[float] = None
+    body_temperature: Optional[float] = None
+    blood_glucose: Optional[float] = None
+    gcs_total: Optional[int] = None
+    measurement_source: str
+    data_quality: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PreHospitalInterventionCreate(BaseModel):
+    intervention_type: str = Field(..., max_length=60)
+    parameters_json: Optional[Dict[str, Any]] = None
+    patient_response: str = Field("unchanged", max_length=50)
+    notes: Optional[str] = None
+    performed_at: Optional[datetime] = None
+
+
+class PreHospitalInterventionResponse(BaseModel):
+    id: int
+    encounter_id: int
+    performer_id: Optional[int] = None
+    intervention_type: str
+    parameters_json: Optional[str] = None
+    patient_response: str
+    notes: Optional[str] = None
+    performed_at: datetime
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MedicationAdministrationCreate(BaseModel):
+    medication_name: str = Field(..., min_length=2, max_length=100)
+    dose: float = Field(..., gt=0.0)
+    unit: str = Field(..., max_length=30)
+    route: str = Field(..., max_length=50)
+    response_notes: Optional[str] = None
+    administered_at: Optional[datetime] = None
+
+
+class MedicationAdministrationResponse(BaseModel):
+    id: int
+    encounter_id: int
+    administering_user_id: Optional[int] = None
+    medication_name: str
+    dose: float
+    unit: str
+    route: str
+    response_notes: Optional[str] = None
+    verification_status: str
+    administered_at: datetime
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DigitalHandoverCreate(BaseModel):
+    encounter_id: int
+    facility_id: int
+    receiving_department: Optional[str] = "Emergency Department"
+    outstanding_clinical_concerns: Optional[str] = None
+
+
+class DigitalHandoverSubmit(BaseModel):
+    receiving_department: Optional[str] = None
+    outstanding_clinical_concerns: Optional[str] = None
+
+
+class DigitalHandoverActionRequest(BaseModel):
+    action: str = Field(..., description="'receive', 'acknowledge', 'complete', 'clarify', 'correct'")
+    clarification_notes: Optional[str] = None
+    correction_reason: Optional[str] = None
+    outstanding_clinical_concerns: Optional[str] = None
+
+
+class DigitalHandoverRecordResponse(BaseModel):
+    id: int
+    handover_token: str
+    encounter_id: int
+    facility_id: int
+    version: int
+    previous_version_id: Optional[int] = None
+    status: str
+    sending_responder_id: Optional[int] = None
+    submitted_at: Optional[datetime] = None
+    receiving_staff_id: Optional[int] = None
+    receiving_department: Optional[str] = None
+    received_at: Optional[datetime] = None
+    acknowledged_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    clarification_notes: Optional[str] = None
+    correction_reason: Optional[str] = None
+    clinical_summary_json: Optional[str] = None
+    outstanding_clinical_concerns: Optional[str] = None
+    is_final: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HandoverAttachmentCreate(BaseModel):
+    file_name: str = Field(..., max_length=150)
+    file_type: str = Field(..., max_length=50)
+    mime_type: str = Field(..., max_length=100)
+    file_size_bytes: int = Field(..., gt=0)
+    storage_path: str = Field(..., max_length=255)
+    handover_id: Optional[int] = None
+    is_confidential: bool = True
+
+
+class HandoverAttachmentResponse(BaseModel):
+    id: int
+    attachment_token: str
+    encounter_id: int
+    handover_id: Optional[int] = None
+    file_name: str
+    file_type: str
+    mime_type: str
+    file_size_bytes: int
+    is_confidential: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ClinicalTimelineEventResponse(BaseModel):
+    id: int
+    event_token: str
+    encounter_id: int
+    event_type: str
+    event_timestamp: datetime
+    server_receipt_timestamp: datetime
+    actor_id: Optional[int] = None
+    actor_role: str
+    structured_data_json: Optional[str] = None
+    source_application: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
 
 
 

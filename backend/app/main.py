@@ -78,6 +78,7 @@ from app.realtime import realtime_router, redis_subscriber
 from app.routers.dispatch import router as dispatch_router
 from app.routers.responder_ops import router as responder_ops_router
 from app.routers.hospital_coordination import router as hospital_coordination_router
+from app.routers.clinical_handover import router as clinical_handover_router
 
 
 @asynccontextmanager
@@ -179,6 +180,9 @@ app.include_router(responder_ops_router)
 
 # Milestone 7 Router: Hospital Readiness, Dynamic Capacity & Emergency Coordination
 app.include_router(hospital_coordination_router)
+
+# Milestone 8 Router: Digital Patient Handover & Clinical Information Continuity
+app.include_router(clinical_handover_router)
 
 
 # ==============================================================================

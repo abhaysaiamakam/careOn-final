@@ -6,6 +6,7 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Date,
     Float,
     Boolean,
     ForeignKey,
@@ -871,6 +872,269 @@ class HospitalDiversionLog(Base):
 
     facility = relationship("HospitalFacility", back_populates="diversion_logs")
     authorized_by_user = relationship("User", foreign_keys=[authorized_by_user_id])
+
+
+# ==============================================================================
+# Milestone 8 — Patient Identity, Encounters & Pre-Hospital Clinical Models
+# ==============================================================================
+class Patient(Base):
+    """
+    Patient identity entity.
+    Supports unknown/unidentified patients, provisional IDs, verified identity,
+    and distinct history verification states.
+    """
+    __tablename__ = "patients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_identifier = Column(String(40), unique=True, index=True, nullable=False)
+    full_name = Column(String(120), nullable=True)
+    identity_status = Column(String(30), default="unknown", nullable=False)  # unknown, provisional, verified
+    date_of_birth = Column(Date, nullable=True)
+    estimated_age = Column(Integer, nullable=True)
+    gender = Column(String(20), default="unknown", nullable=False)  # male, female, non_binary, unknown
+    contact_phone = Column(String(30), nullable=True)
+    emergency_contact_name = Column(String(100), nullable=True)
+    emergency_contact_phone = Column(String(30), nullable=True)
+    blood_group = Column(String(10), nullable=True)
+    known_allergies = Column(Text, nullable=True)
+    known_medical_conditions = Column(Text, nullable=True)
+    current_medications = Column(Text, nullable=True)
+    history_verification_status = Column(String(30), default="unknown", nullable=False)  # patient_reported, family_reported, clinical_verified, unknown
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    encounters = relationship("EmergencyEncounter", back_populates="patient", cascade="all, delete-orphan")
+
+
+class EmergencyEncounter(Base):
+    """
+    An emergency healthcare care episode linking an Incident, Patient, Mission Assignment,
+    and Receiving Hospital Facility.
+    """
+    __tablename__ = "emergency_encounters"
+    __table_args__ = (
+        Index("ix_encounters_incident", "incident_id"),
+        Index("ix_encounters_patient", "patient_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    encounter_code = Column(String(40), unique=True, index=True, nullable=False)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignment_id = Column(Integer, ForeignKey("assignments.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigned_responder_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    receiving_facility_id = Column(Integer, ForeignKey("hospital_facilities.id", ondelete="SET NULL"), nullable=True, index=True)
+    status = Column(String(30), default="active", nullable=False)  # active, in_transport, handed_over, completed, cancelled
+    chief_complaint = Column(String(255), nullable=False)
+    initial_acuity = Column(String(30), default="High", nullable=False)  # Critical, High, Medium, Low
+    started_at = Column(DateTime, default=utc_now, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    patient = relationship("Patient", back_populates="encounters")
+    incident = relationship("Incident")
+    assignment = relationship("Assignment")
+    assigned_responder = relationship("User", foreign_keys=[assigned_responder_id])
+    receiving_facility = relationship("HospitalFacility", foreign_keys=[receiving_facility_id])
+
+    assessments = relationship("ClinicalAssessment", back_populates="encounter", cascade="all, delete-orphan")
+    vitals = relationship("VitalSignObservation", back_populates="encounter", cascade="all, delete-orphan")
+    interventions = relationship("PreHospitalIntervention", back_populates="encounter", cascade="all, delete-orphan")
+    medications = relationship("MedicationAdministration", back_populates="encounter", cascade="all, delete-orphan")
+    timeline_events = relationship("ClinicalTimelineEvent", back_populates="encounter", cascade="all, delete-orphan")
+    handovers = relationship("DigitalHandoverRecord", back_populates="encounter", cascade="all, delete-orphan")
+    attachments = relationship("HandoverAttachment", back_populates="encounter", cascade="all, delete-orphan")
+
+
+class ClinicalAssessment(Base):
+    """
+    Structured physical & neurological assessment performed by field responders.
+    """
+    __tablename__ = "clinical_assessments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    encounter_id = Column(Integer, ForeignKey("emergency_encounters.id", ondelete="CASCADE"), nullable=False, index=True)
+    responder_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assessed_at = Column(DateTime, default=utc_now, nullable=False)
+    consciousness_level = Column(String(30), default="Alert", nullable=False)  # Alert, Voice, Pain, Unresponsive
+    airway_status = Column(String(50), default="clear", nullable=False)
+    breathing_status = Column(String(50), default="normal", nullable=False)
+    circulation_status = Column(String(50), default="normal_pulses", nullable=False)
+    presenting_complaints = Column(Text, nullable=True)
+    observed_injuries = Column(Text, nullable=True)
+    symptoms = Column(Text, nullable=True)
+    clinical_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    encounter = relationship("EmergencyEncounter", back_populates="assessments")
+    responder = relationship("User", foreign_keys=[responder_id])
+
+
+class VitalSignObservation(Base):
+    """
+    Periodic or continuous physiological vital sign observations.
+    """
+    __tablename__ = "vital_sign_observations"
+    __table_args__ = (
+        Index("ix_vitals_encounter_time", "encounter_id", "observed_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    encounter_id = Column(Integer, ForeignKey("emergency_encounters.id", ondelete="CASCADE"), nullable=False, index=True)
+    recorded_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    observed_at = Column(DateTime, default=utc_now, nullable=False)
+    heart_rate = Column(Integer, nullable=True)
+    systolic_bp = Column(Integer, nullable=True)
+    diastolic_bp = Column(Integer, nullable=True)
+    respiratory_rate = Column(Integer, nullable=True)
+    oxygen_saturation = Column(Float, nullable=True)
+    body_temperature = Column(Float, nullable=True)
+    blood_glucose = Column(Float, nullable=True)
+    gcs_eye = Column(Integer, nullable=True)
+    gcs_verbal = Column(Integer, nullable=True)
+    gcs_motor = Column(Integer, nullable=True)
+    gcs_total = Column(Integer, nullable=True)
+    measurement_source = Column(String(50), default="manual", nullable=False)  # manual, monitor_automated, patient_reported
+    data_quality = Column(String(30), default="verified", nullable=False)  # verified, provisional, artifact_flagged
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    encounter = relationship("EmergencyEncounter", back_populates="vitals")
+    recorded_by = relationship("User", foreign_keys=[recorded_by_user_id])
+
+
+class PreHospitalIntervention(Base):
+    """
+    Life-saving or supportive clinical interventions performed pre-hospital.
+    """
+    __tablename__ = "prehospital_interventions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    encounter_id = Column(Integer, ForeignKey("emergency_encounters.id", ondelete="CASCADE"), nullable=False, index=True)
+    performer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    intervention_type = Column(String(60), nullable=False)  # oxygen_therapy, cpr, defibrillation, bleeding_control, immobilization, iv_access
+    parameters_json = Column(Text, nullable=True)
+    patient_response = Column(String(50), default="unchanged", nullable=False)  # improved, unchanged, deteriorated, successful
+    notes = Column(Text, nullable=True)
+    performed_at = Column(DateTime, default=utc_now, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    encounter = relationship("EmergencyEncounter", back_populates="interventions")
+    performer = relationship("User", foreign_keys=[performer_id])
+
+
+class MedicationAdministration(Base):
+    """
+    Field medication administration audit record.
+    """
+    __tablename__ = "medication_administrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    encounter_id = Column(Integer, ForeignKey("emergency_encounters.id", ondelete="CASCADE"), nullable=False, index=True)
+    administering_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    medication_name = Column(String(100), nullable=False)
+    dose = Column(Float, nullable=False)
+    unit = Column(String(30), nullable=False)  # mg, mcg, mL, L
+    route = Column(String(50), nullable=False)  # IV, IM, IN, PO, Sublingual, Nebulized
+    response_notes = Column(Text, nullable=True)
+    verification_status = Column(String(30), default="administered", nullable=False)  # administered, cosigned, standing_order
+    administered_at = Column(DateTime, default=utc_now, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    encounter = relationship("EmergencyEncounter", back_populates="medications")
+    administering_user = relationship("User", foreign_keys=[administering_user_id])
+
+
+class ClinicalTimelineEvent(Base):
+    """
+    Immutable chronological timeline recording all operational and clinical events.
+    Distinguishes client device timestamp from server receipt timestamp.
+    """
+    __tablename__ = "clinical_timeline_events"
+    __table_args__ = (
+        Index("ix_timeline_encounter_time", "encounter_id", "event_timestamp"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_token = Column(String(36), unique=True, index=True, nullable=False)
+    encounter_id = Column(Integer, ForeignKey("emergency_encounters.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(60), nullable=False)
+    event_timestamp = Column(DateTime, default=utc_now, nullable=False)
+    server_receipt_timestamp = Column(DateTime, default=utc_now, nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_role = Column(String(30), nullable=False)
+    structured_data_json = Column(Text, nullable=True)
+    source_application = Column(String(40), default="responder_mobile", nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    encounter = relationship("EmergencyEncounter", back_populates="timeline_events")
+    actor = relationship("User", foreign_keys=[actor_id])
+
+
+class DigitalHandoverRecord(Base):
+    """
+    Formal digital handover document and clinical transfer of care agreement.
+    Supports state machine progression, versioning, amendments, and dual-party confirmation.
+    """
+    __tablename__ = "digital_handover_records"
+    __table_args__ = (
+        Index("ix_handover_encounter_version", "encounter_id", "version"),
+        Index("ix_handover_facility_status", "facility_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    handover_token = Column(String(36), unique=True, index=True, nullable=False)
+    encounter_id = Column(Integer, ForeignKey("emergency_encounters.id", ondelete="CASCADE"), nullable=False, index=True)
+    facility_id = Column(Integer, ForeignKey("hospital_facilities.id", ondelete="CASCADE"), nullable=False, index=True)
+    version = Column(Integer, default=1, nullable=False)
+    previous_version_id = Column(Integer, ForeignKey("digital_handover_records.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(40), default="draft", nullable=False)  # draft, ready_for_handover, submitted, received, acknowledged, clarification_requested, correction_required, completed, cancelled
+    sending_responder_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    receiving_staff_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    receiving_department = Column(String(100), nullable=True)
+    received_at = Column(DateTime, nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    clarification_notes = Column(Text, nullable=True)
+    correction_reason = Column(Text, nullable=True)
+    clinical_summary_json = Column(Text, nullable=True)
+    outstanding_clinical_concerns = Column(Text, nullable=True)
+    is_final = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    encounter = relationship("EmergencyEncounter", back_populates="handovers")
+    facility = relationship("HospitalFacility")
+    sending_responder = relationship("User", foreign_keys=[sending_responder_id])
+    receiving_staff = relationship("User", foreign_keys=[receiving_staff_id])
+    previous_version = relationship("DigitalHandoverRecord", remote_side=[id])
+    attachments = relationship("HandoverAttachment", back_populates="handover")
+
+
+class HandoverAttachment(Base):
+    """
+    Secure attachment associated with an emergency clinical encounter or handover document.
+    """
+    __tablename__ = "handover_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    attachment_token = Column(String(36), unique=True, index=True, nullable=False)
+    encounter_id = Column(Integer, ForeignKey("emergency_encounters.id", ondelete="CASCADE"), nullable=False, index=True)
+    handover_id = Column(Integer, ForeignKey("digital_handover_records.id", ondelete="SET NULL"), nullable=True, index=True)
+    file_name = Column(String(150), nullable=False)
+    file_type = Column(String(50), nullable=False)  # ecg_strip, injury_photo, prior_medical_record, transfer_form
+    mime_type = Column(String(100), nullable=False)
+    file_size_bytes = Column(Integer, nullable=False)
+    storage_path = Column(String(255), nullable=False)
+    uploaded_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_confidential = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    encounter = relationship("EmergencyEncounter", back_populates="attachments")
+    handover = relationship("DigitalHandoverRecord", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_user_id])
+
 
 
 
