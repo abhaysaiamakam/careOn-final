@@ -74,10 +74,21 @@ def process_dispatch_decision(
     if active_inc_assignment:
         raise ValueError(f"Incident {incident.incident_code} already has an active resource assigned.")
 
-    # 3. Fetch and atomically claim Resource
+    # 3. Fetch and validate Resource
     resource = db.query(Resource).filter(Resource.id == selected_resource_id).first()
     if not resource:
         raise ValueError(f"Resource #{selected_resource_id} not found.")
+
+    # 3b. M6 Safety Invariant: Verify hard safety constraints
+    from app.dispatch.assessment import assess_incident
+    from app.dispatch.eligibility import check_resource_eligibility
+    assessment = assess_incident(incident, db)
+    eligibility = check_resource_eligibility(resource, assessment, db)
+    if not eligibility.is_eligible:
+        raise ValueError(
+            f"Resource conflict / safety constraint violation: Selected resource #{selected_resource_id} cannot bypass hard constraints: "
+            f"{'; '.join(eligibility.reasons)}"
+        )
 
     if resource.status != "Available":
         # Conflict event publication

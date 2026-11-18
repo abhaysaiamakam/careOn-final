@@ -76,6 +76,7 @@ from app.routers.hospital import router as hospital_router
 from app.routers.super_admin import router as super_admin_router
 from app.realtime import realtime_router, redis_subscriber
 from app.routers.dispatch import router as dispatch_router
+from app.routers.responder_ops import router as responder_ops_router
 
 
 @asynccontextmanager
@@ -171,6 +172,9 @@ app.include_router(realtime_router)
 
 # Milestone 5 Router: Intelligent Dispatch & Resource Optimization Engine
 app.include_router(dispatch_router)
+
+# Milestone 6 Router: Responder Operations, Lifecycle State Machine & Push Notifications
+app.include_router(responder_ops_router)
 
 
 # ==============================================================================

@@ -786,4 +786,113 @@ class ResourceCapabilityUpdateRequest(BaseModel):
     status: Optional[str] = None
 
 
+# ==============================================================================
+# Milestone 6 — Responder Operations, Mobile Reliability & Notification Schemas
+# ==============================================================================
+
+class DeviceRegistrationCreate(BaseModel):
+    device_token: str = Field(..., min_length=4, max_length=255)
+    platform: str = Field(..., description="fcm, apns, or web_push")
+    device_model: Optional[str] = Field(None, max_length=100)
+    app_version: Optional[str] = Field(None, max_length=50)
+
+
+class DeviceRegistrationResponse(BaseModel):
+    id: int
+    user_id: int
+    device_token: str
+    platform: str
+    device_model: Optional[str] = None
+    app_version: Optional[str] = None
+    is_active: bool
+    last_seen_at: datetime
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MissionAcknowledgementRequest(BaseModel):
+    action: str = Field(..., description="'accept' or 'reject'")
+    rejection_reason: Optional[str] = Field(None, description="Mandatory when action is 'reject'")
+    client_action_id: Optional[str] = None
+
+
+class MissionTransitionRequest(BaseModel):
+    target_status: str = Field(..., description="e.g. en_route_incident, arrived_scene, patient_contact, patient_picked_up, en_route_hospital, arrived_hospital, handover_initiated, handover_completed, completed, cancelled")
+    client_action_id: Optional[str] = None
+    client_timestamp: Optional[datetime] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    hospital_id: Optional[int] = None
+    notes: Optional[str] = None
+    rejection_reason: Optional[str] = None
+
+
+class MissionTransitionResponse(BaseModel):
+    assignment_id: int
+    incident_id: int
+    resource_id: int
+    previous_status: Optional[str]
+    current_status: str
+    is_duplicate_replay: bool
+    server_timestamp: datetime
+
+
+class MissionEventLogResponse(BaseModel):
+    id: int
+    assignment_id: int
+    incident_id: int
+    resource_id: int
+    actor_id: Optional[int] = None
+    actor_role: str
+    previous_status: Optional[str] = None
+    new_status: str
+    client_action_id: Optional[str] = None
+    client_timestamp: Optional[datetime] = None
+    server_timestamp: datetime
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    notes: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    hospital_id: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TelemetryPointSchema(BaseModel):
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    speed: Optional[float] = Field(None, ge=0.0)
+    heading: Optional[float] = Field(None, ge=0.0, le=360.0)
+    accuracy: Optional[float] = Field(None, ge=0.0)
+    battery_level: Optional[float] = Field(None, ge=0.0, le=100.0)
+    network_type: Optional[str] = Field(None, max_length=30)
+    is_buffered: bool = False
+    client_action_id: Optional[str] = None
+    client_timestamp: Optional[datetime] = None
+
+
+class TelemetryBatchRequest(BaseModel):
+    resource_id: int
+    points: List[TelemetryPointSchema]
+
+
+class NotificationDeliveryResponse(BaseModel):
+    notification_id: str
+    user_id: int
+    device_token: Optional[str] = None
+    platform: str
+    category: str
+    title: str
+    body: str
+    status: str
+    retry_count: int
+    error_message: Optional[str] = None
+    created_at: datetime
+    sent_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+
 

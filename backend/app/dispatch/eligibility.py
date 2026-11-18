@@ -21,8 +21,41 @@ from app.models import Resource, Assignment, Incident
 from app.dispatch.assessment import IncidentAssessment
 
 # Maximum allowable staleness for GPS before marking ineligible (in seconds)
-MAX_STALE_GPS_SECONDS = 3600  # 60 minutes hard cutoff; 1800s warning cutoff
-WARNING_STALE_GPS_SECONDS = 1800  # 30 minutes warning
+# Operational freshness thresholds:
+# <= 300s (5m): VERIFIED_LIVE
+# 300s - 900s (5-15m): AGING
+# 900s - 1800s (15-30m): STALE
+# > 1800s (30m): UNKNOWN_OR_EXPIRED (Ineligible for emergency dispatch)
+MAX_STALE_GPS_SECONDS = 1800      # 30 minutes hard cutoff
+WARNING_STALE_GPS_SECONDS = 300   # 5 minutes warning
+
+
+class LocationFreshnessStatus:
+    VERIFIED_LIVE = "verified_live"
+    AGING = "aging"
+    STALE = "stale"
+    UNKNOWN_OR_EXPIRED = "unknown_or_expired"
+
+
+def determine_location_freshness(last_updated: Optional[datetime]) -> Tuple[str, float]:
+    """Return (freshness_status, age_in_seconds)."""
+    if not last_updated:
+        return LocationFreshnessStatus.UNKNOWN_OR_EXPIRED, float("inf")
+
+    now_dt = datetime.now(timezone.utc)
+    res_dt = last_updated
+    if res_dt.tzinfo is None:
+        res_dt = res_dt.replace(tzinfo=timezone.utc)
+
+    age_seconds = max(0.0, (now_dt - res_dt).total_seconds())
+    if age_seconds <= 300:
+        return LocationFreshnessStatus.VERIFIED_LIVE, age_seconds
+    elif age_seconds <= 900:
+        return LocationFreshnessStatus.AGING, age_seconds
+    elif age_seconds <= 1800:
+        return LocationFreshnessStatus.STALE, age_seconds
+    else:
+        return LocationFreshnessStatus.UNKNOWN_OR_EXPIRED, age_seconds
 
 
 @dataclass
@@ -36,7 +69,8 @@ class EligibilityResult:
     missing_capabilities: List[str]
     missing_equipment: List[str]
     is_stale_gps: bool
-    warnings: List[str]
+    freshness_status: str = LocationFreshnessStatus.VERIFIED_LIVE
+    warnings: List[str] = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -49,6 +83,7 @@ class EligibilityResult:
             "missing_capabilities": self.missing_capabilities,
             "missing_equipment": self.missing_equipment,
             "is_stale_gps": self.is_stale_gps,
+            "freshness_status": self.freshness_status,
             "warnings": self.warnings,
         }
 
@@ -94,26 +129,22 @@ def check_resource_eligibility(
         )
 
     # 3. Location Freshness Check
-    is_stale = False
-    if resource.last_updated:
-        now_dt = datetime.now(timezone.utc)
-        # Handle naive datetime from SQLite or PostgreSQL
-        res_updated = resource.last_updated
-        if res_updated.tzinfo is None:
-            res_updated = res_updated.replace(tzinfo=timezone.utc)
+    freshness_status, age_seconds = determine_location_freshness(resource.last_updated)
+    is_stale = freshness_status in (LocationFreshnessStatus.STALE, LocationFreshnessStatus.UNKNOWN_OR_EXPIRED)
 
-        age_seconds = (now_dt - res_updated).total_seconds()
-        if age_seconds > max_stale_seconds:
-            is_eligible = False
-            is_stale = True
-            reasons.append(
-                f"GPS location is stale ({int(age_seconds // 60)} mins old, limit {max_stale_seconds // 60} mins)."
-            )
-        elif age_seconds > WARNING_STALE_GPS_SECONDS:
-            is_stale = True
-            warnings.append(
-                f"GPS telemetry is aging ({int(age_seconds // 60)} mins old)."
-            )
+    if freshness_status == LocationFreshnessStatus.UNKNOWN_OR_EXPIRED:
+        is_eligible = False
+        reasons.append(
+            f"GPS telemetry is stale / expired ({int(age_seconds // 60)} mins old, cutoff {max_stale_seconds // 60} mins)."
+        )
+    elif freshness_status == LocationFreshnessStatus.STALE:
+        warnings.append(
+            f"GPS telemetry is stale ({int(age_seconds // 60)} mins old, re-verification recommended)."
+        )
+    elif freshness_status == LocationFreshnessStatus.AGING:
+        warnings.append(
+            f"GPS telemetry is aging ({int(age_seconds // 60)} mins old)."
+        )
 
     # 4. Capability Match (Hard Constraints)
     resource_caps = parse_csv_set(resource.capabilities)
@@ -159,6 +190,7 @@ def check_resource_eligibility(
         missing_capabilities=missing_caps,
         missing_equipment=missing_equip,
         is_stale_gps=is_stale,
+        freshness_status=freshness_status,
         warnings=warnings,
     )
 

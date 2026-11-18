@@ -240,9 +240,14 @@ class Assignment(Base):
     assigned_at = Column(DateTime, default=utc_now)
     released_at = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
+    acknowledgement_status = Column(String(30), nullable=False, default="pending")  # pending, acknowledged, rejected, timeout
+    acknowledged_at = Column(DateTime, nullable=True)
+    acknowledgement_deadline = Column(DateTime, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
 
     incident = relationship("Incident", back_populates="assignments")
     resource = relationship("Resource", back_populates="assignments")
+    mission_events = relationship("MissionEventLog", back_populates="assignment", cascade="all, delete-orphan")
 
 
 class ExternalProvider(Base):
@@ -571,6 +576,130 @@ class DispatchDecision(Base):
     recommended_resource = relationship("Resource", foreign_keys=[recommended_resource_id])
     selected_resource = relationship("Resource", foreign_keys=[selected_resource_id])
     dispatcher = relationship("User", foreign_keys=[dispatcher_id])
+
+
+# ==============================================================================
+# Milestone 6 — Responder Mission State Machine & Event Logs
+# ==============================================================================
+class MissionEventLog(Base):
+    """
+    Immutable mission event audit log tracking responder operations.
+    Captures: assigned -> accepted -> en_route -> on_scene -> patient_picked_up -> hospital_arrival -> handover -> completed.
+    Includes client idempotency keys, offline timestamps, and geospatial coordinates.
+    """
+    __tablename__ = "mission_event_logs"
+    __table_args__ = (
+        Index("ix_mission_events_assignment", "assignment_id", "server_timestamp"),
+        Index("ix_mission_events_incident", "incident_id", "server_timestamp"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    assignment_id = Column(Integer, ForeignKey("assignments.id", ondelete="CASCADE"), nullable=False, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    resource_id = Column(Integer, ForeignKey("resources.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_role = Column(String(30), nullable=False)
+    previous_status = Column(String(40), nullable=True)
+    new_status = Column(String(40), nullable=False)
+    client_action_id = Column(String(64), nullable=True, index=True)  # Client idempotency key
+    client_timestamp = Column(DateTime, nullable=True)
+    server_timestamp = Column(DateTime, default=utc_now, nullable=False)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    hospital_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+
+    assignment = relationship("Assignment", back_populates="mission_events")
+    incident = relationship("Incident")
+    resource = relationship("Resource")
+    actor = relationship("User", foreign_keys=[actor_id])
+    hospital = relationship("Organization", foreign_keys=[hospital_id])
+
+
+# ==============================================================================
+# Milestone 6 — Push Notification Infrastructure Models
+# ==============================================================================
+class DeviceRegistration(Base):
+    """
+    Device tokens registered by responders (PWA Web Push, Capacitor, or Native).
+    Supports token replacement, platform targeting (fcm, apns, web_push), and deactivation.
+    """
+    __tablename__ = "device_registrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_token = Column(String(255), unique=True, index=True, nullable=False)
+    platform = Column(String(30), nullable=False)  # fcm, apns, web_push
+    device_model = Column(String(100), nullable=True)
+    app_version = Column(String(50), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    last_seen_at = Column(DateTime, default=utc_now, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    user = relationship("User")
+
+
+class NotificationDeliveryLog(Base):
+    """
+    Audit and delivery tracking log for emergency push notifications.
+    Strict privacy: zero sensitive patient PII or internal triage records stored in payload.
+    """
+    __tablename__ = "notification_delivery_logs"
+    __table_args__ = (
+        Index("ix_notification_logs_user", "user_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    notification_id = Column(String(36), unique=True, index=True, nullable=False)  # UUID
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_token = Column(String(255), nullable=True)
+    platform = Column(String(30), nullable=False)
+    category = Column(String(50), nullable=False)  # new_assignment, ack_reminder, cancellation, mission_update, critical_alert
+    title = Column(String(150), nullable=False)
+    body = Column(String(255), nullable=False)
+    status = Column(String(30), default="queued", nullable=False)  # queued, sent, delivered, failed, expired
+    retry_count = Column(Integer, default=0, nullable=False)
+    error_message = Column(Text, nullable=True)
+    idempotency_key = Column(String(64), nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    sent_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+
+
+# ==============================================================================
+# Milestone 6 — Responder Telemetry & Location Freshness Log
+# ==============================================================================
+class ResponderTelemetryLog(Base):
+    """
+    Continuous telemetry log supporting batch submission, offline sync buffering,
+    GPS accuracy metadata, and velocity anomaly detection.
+    """
+    __tablename__ = "responder_telemetry_logs"
+    __table_args__ = (
+        Index("ix_telemetry_resource_time", "resource_id", "server_timestamp"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    resource_id = Column(Integer, ForeignKey("resources.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    speed = Column(Float, nullable=True)
+    heading = Column(Float, nullable=True)
+    accuracy = Column(Float, nullable=True)
+    battery_level = Column(Float, nullable=True)
+    network_type = Column(String(30), nullable=True)
+    freshness_status = Column(String(30), default="verified_live", nullable=False)
+    is_buffered = Column(Boolean, default=False, nullable=False)
+    client_action_id = Column(String(64), nullable=True, index=True)
+    client_timestamp = Column(DateTime, nullable=True)
+    server_timestamp = Column(DateTime, default=utc_now, nullable=False)
+
+    resource = relationship("Resource")
+    user = relationship("User")
 
 
 
