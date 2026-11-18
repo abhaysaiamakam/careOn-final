@@ -24,6 +24,20 @@ from app.schemas import (
 from app.intelligence.demand_analytics import get_clean_historical_incidents_query
 
 
+def calculate_grid_cell_degrees(latitude: float, grid_size_km: float) -> Tuple[float, float]:
+    """
+    Compute degree steps for latitude and longitude adjusted for Earth's curvature.
+    Prevents longitude distortion at non-equatorial latitudes.
+    1 deg latitude ≈ 111.0 km.
+    1 deg longitude ≈ 111.0 * cos(latitude) km.
+    """
+    lat_deg = grid_size_km / 111.0
+    lat_rad = math.radians(latitude)
+    cos_lat = max(0.01, math.cos(lat_rad))
+    lon_deg = grid_size_km / (111.0 * cos_lat)
+    return lat_deg, lon_deg
+
+
 def analyze_geospatial_hotspots(
     db: Session,
     request: HotspotAnalysisRequest,
@@ -31,7 +45,8 @@ def analyze_geospatial_hotspots(
 ) -> HotspotAnalysisResponse:
     """
     Cluster and analyze spatial emergency demand across configured grid resolution.
-    Cross-dialect support: uses PostGIS ST_SnapToGrid on PostgreSQL and mathematical binning on SQLite.
+    Cross-dialect support: uses PostGIS ST_SnapToGrid on PostgreSQL and geodesic binning on SQLite.
+    Correctly compensates for longitude compression across latitudes.
     """
     now = utc_now()
     clean_query = get_clean_historical_incidents_query(db, days=request.days, organization_id=organization_id)
@@ -47,17 +62,14 @@ def analyze_geospatial_hotspots(
             generated_at=now,
         )
 
-    # 1 degree latitude is approx 111.0 km
-    # grid_size in degrees
-    grid_deg = request.grid_size_km / 111.0
-
-    # Group incidents into spatial grid bins
+    # Group incidents into curvature-adjusted spatial grid bins
     bins: Dict[Tuple[int, int], List[Incident]] = {}
     for inc in incidents:
         if inc.latitude is None or inc.longitude is None:
             continue
-        lat_bin = int(math.floor(inc.latitude / grid_deg))
-        lon_bin = int(math.floor(inc.longitude / grid_deg))
+        lat_step, lon_step = calculate_grid_cell_degrees(inc.latitude, request.grid_size_km)
+        lat_bin = int(math.floor(inc.latitude / lat_step))
+        lon_bin = int(math.floor(inc.longitude / lon_step))
         bins.setdefault((lat_bin, lon_bin), []).append(inc)
 
     clusters: List[HotspotCluster] = []

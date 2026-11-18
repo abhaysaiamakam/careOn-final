@@ -12,6 +12,8 @@ from app.intelligence.hotspot_engine import (
 from app.intelligence.forecasting_engine import (
     generate_demand_forecast,
     evaluate_model_chronologically,
+    calculate_poisson_uncertainty_interval,
+    calculate_empirical_interval_coverage,
     RollingAverageBaseline,
     SeasonalBaselineModel,
     PoissonRegressionModel,
@@ -31,6 +33,7 @@ from app.intelligence.governance import (
     reject_positioning_recommendation,
     modify_positioning_recommendation,
     execute_positioning_recommendation,
+    verify_resource_eligibility_for_positioning,
 )
 from app.intelligence.scenario_simulator import (
     simulate_operational_scenario,

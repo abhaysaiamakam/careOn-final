@@ -41,6 +41,59 @@ logger = logging.getLogger("careon.intelligence.forecasting")
 
 
 # ---------------------------------------------------------------------------
+# Statistical Confidence & Uncertainty Intervals
+# ---------------------------------------------------------------------------
+
+def calculate_poisson_uncertainty_interval(
+    expected: float,
+    alpha: float = 0.05,
+    method: str = "score",
+) -> Tuple[float, float, str]:
+    """
+    Calculate Poisson prediction / uncertainty interval for count expectation lambda.
+
+    Methods:
+    - 'score': Poisson Score-Test interval (quadratic score inversion: lambda + z^2/2 ± z*sqrt(lambda + z^2/4)).
+      Guarantees coverage close to nominal 95% even for small expected counts (lambda < 5) and avoids
+      negative lower limits.
+    - 'wald': Asymptotic normal approximation (lambda ± z*sqrt(lambda)). Note: undercovers when lambda < 10.
+    """
+    z = 1.96  # Standard two-tailed alpha=0.05 critical value
+    exp_safe = max(0.0, float(expected))
+
+    if method == "score":
+        # Score-test quadratic inversion for Poisson counts
+        center = exp_safe + (z ** 2) / 2.0  # lambda + 1.9208
+        margin = z * math.sqrt(exp_safe + (z ** 2) / 4.0)  # 1.96 * sqrt(lambda + 0.9604)
+        lower = max(0.0, round(center - margin, 2))
+        upper = round(center + margin, 2)
+        desc = "Poisson score-test 95% interval (lambda + 1.92 ± 1.96*sqrt(lambda + 0.96))"
+    else:
+        # Wald normal approximation
+        std_err = math.sqrt(exp_safe) if exp_safe > 0 else 0.5
+        lower = max(0.0, round(exp_safe - (z * std_err), 2))
+        upper = round(exp_safe + (z * std_err), 2)
+        desc = "Asymptotic normal Wald approximation (lambda ± 1.96*sqrt(lambda))"
+
+    return lower, upper, desc
+
+
+def calculate_empirical_interval_coverage(
+    actuals: List[float],
+    lower_bounds: List[float],
+    upper_bounds: List[float],
+) -> float:
+    """
+    Compute empirical coverage percentage of prediction intervals on holdout data.
+    Returns percentage of actuals falling within [lower, upper] (0.0 to 100.0).
+    """
+    if not actuals or len(actuals) != len(lower_bounds) or len(actuals) != len(upper_bounds):
+        return 0.0
+    covered = sum(1 for a, l, u in zip(actuals, lower_bounds, upper_bounds) if l <= a <= u)
+    return round((covered / len(actuals)) * 100.0, 1)
+
+
+# ---------------------------------------------------------------------------
 # Forecasting Model Implementations
 # ---------------------------------------------------------------------------
 
@@ -89,10 +142,8 @@ class RollingAverageBaseline(ForecastModelBase):
         hourly_rate = len(historical_incidents) / span_hours
         expected = round(hourly_rate * horizon_hours, 2)
 
-        # Poisson 95% interval
-        std_err = math.sqrt(expected) if expected > 0 else 0.5
-        conf_lower = max(0.0, round(expected - (1.96 * std_err), 2))
-        conf_upper = round(expected + (1.96 * std_err), 2)
+        # Poisson 95% interval via score test
+        conf_lower, conf_upper, method_desc = calculate_poisson_uncertainty_interval(expected, method="score")
 
         conf_level = "HIGH" if len(historical_incidents) >= 20 else ("MEDIUM" if len(historical_incidents) >= 5 else "LOW")
 
@@ -153,9 +204,7 @@ class SeasonalBaselineModel(ForecastModelBase):
             expected = round(overall_hourly * horizon_hours, 2)
 
         expected = max(0.1, expected)
-        std_err = math.sqrt(expected)
-        conf_lower = max(0.0, round(expected - (1.96 * std_err), 2))
-        conf_upper = round(expected + (1.96 * std_err), 2)
+        conf_lower, conf_upper, method_desc = calculate_poisson_uncertainty_interval(expected, method="score")
 
         conf_level = "HIGH" if len(historical_incidents) >= 30 else "MEDIUM"
 
@@ -215,10 +264,8 @@ class PoissonRegressionModel(ForecastModelBase):
         expected = round(estimated_hourly * horizon_hours, 2)
         expected = max(0.1, expected)
 
-        # 95% Poisson confidence interval
-        std_err = math.sqrt(expected)
-        conf_lower = max(0.0, round(expected - (1.96 * std_err), 2))
-        conf_upper = round(expected + (1.96 * std_err), 2)
+        # Poisson 95% confidence interval via score test
+        conf_lower, conf_upper, method_desc = calculate_poisson_uncertainty_interval(expected, method="score")
 
         conf_level = "HIGH" if total_count >= 50 else "MEDIUM"
 
@@ -321,6 +368,10 @@ def evaluate_model_chronologically(
     actual_counts = []
     cand_preds = []
     base_preds = []
+    cand_lowers = []
+    cand_uppers = []
+    base_lowers = []
+    base_uppers = []
 
     # Bucket validation incidents by 6-hour windows
     num_windows = max(1, min(28, validation_days * 4))
@@ -331,14 +382,21 @@ def evaluate_model_chronologically(
         actual_counts.append(float(actual))
 
         # Predict using train set
-        c_exp, _, _, _, _, _ = candidate_model.predict(train_set, w_start, 6, "All")
-        b_exp, _, _, _, _, _ = baseline_model.predict(train_set, w_start, 6, "All")
+        c_exp, c_low, c_up, _, _, _ = candidate_model.predict(train_set, w_start, 6, "All")
+        b_exp, b_low, b_up, _, _, _ = baseline_model.predict(train_set, w_start, 6, "All")
 
         cand_preds.append(c_exp)
         base_preds.append(b_exp)
+        cand_lowers.append(c_low)
+        cand_uppers.append(c_up)
+        base_lowers.append(b_low)
+        base_uppers.append(b_up)
 
     c_mae, c_rmse, c_bias, c_pdev = calculate_evaluation_metrics(actual_counts, cand_preds)
     b_mae, b_rmse, _, _ = calculate_evaluation_metrics(actual_counts, base_preds)
+
+    c_coverage = calculate_empirical_interval_coverage(actual_counts, cand_lowers, cand_uppers)
+    b_coverage = calculate_empirical_interval_coverage(actual_counts, base_lowers, base_uppers)
 
     outperformed = (c_mae <= b_mae) and (c_rmse <= b_rmse)
 
@@ -356,7 +414,7 @@ def evaluate_model_chronologically(
         baseline_mae=b_mae,
         baseline_rmse=b_rmse,
         outperformed_baseline=outperformed,
-        notes=f"Chronological evaluation over {validation_days} days ({num_windows} 6h windows).",
+        notes=f"Chronological evaluation over {validation_days} days ({num_windows} 6h windows). Empirical interval coverage: Candidate={c_coverage}%, Baseline={b_coverage}%.",
         created_at=now,
     )
     db.add(log_entry)

@@ -21,10 +21,13 @@ from app.models import (
     PositioningRecommendation,
     PositioningAuditLog,
     OutboxEvent,
+    Resource,
+    Assignment,
     User,
     make_point_wkt,
     utc_now,
 )
+from app.intelligence.coverage_engine import is_resource_telemetry_fresh
 from app.schemas import (
     PositioningRecommendationReviewRequest,
     PositioningRecommendationRejectRequest,
@@ -33,6 +36,36 @@ from app.schemas import (
 )
 
 logger = logging.getLogger("careon.intelligence.governance")
+
+
+def verify_resource_eligibility_for_positioning(db: Session, resource_id: int) -> Tuple[bool, str]:
+    """
+    Re-evaluate operational availability and location freshness before approval or execution.
+    Guarantees that an ambulance that became occupied or stale after recommendation generation
+    cannot be dispatched into staging.
+    """
+    resource = db.query(Resource).filter(Resource.id == resource_id).first()
+    if not resource:
+        return False, f"Resource {resource_id} no longer exists."
+
+    if resource.status in ["Unavailable", "Under Maintenance"]:
+        return False, f"Resource {resource.resource_code} is currently {resource.status}."
+
+    # Check active assignments
+    active_assignment = (
+        db.query(Assignment)
+        .filter(Assignment.resource_id == resource.id, Assignment.status == "Active")
+        .first()
+    )
+    if active_assignment or resource.status in ["Assigned", "Busy"]:
+        return False, f"Resource {resource.resource_code} has become occupied on an active incident."
+
+    # Check telemetry freshness
+    is_fresh, _, _ = is_resource_telemetry_fresh(db, resource)
+    if not is_fresh:
+        return False, f"Resource {resource.resource_code} GPS telemetry is stale (>15 minutes old)."
+
+    return True, ""
 
 
 def approve_positioning_recommendation(
@@ -72,6 +105,29 @@ def approve_positioning_recommendation(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot approve recommendation in status '{rec.status}'. Must be PENDING_REVIEW or MODIFIED.",
+        )
+
+    # Re-verify resource operational availability and location freshness at approval time
+    is_eligible, ineligibility_reason = verify_resource_eligibility_for_positioning(db, rec.resource_id)
+    if not is_eligible:
+        prev_status = rec.status
+        rec.status = "FAILED"
+        rec.updated_at = now
+        audit = PositioningAuditLog(
+            log_uuid=str(uuid.uuid4()),
+            recommendation_id=rec.id,
+            actor_id=user.id,
+            action="INVALIDATED",
+            previous_status=prev_status,
+            new_status="FAILED",
+            details_json=json.dumps({"reason": ineligibility_reason}),
+            created_at=now,
+        )
+        db.add(audit)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Approval rejected: {ineligibility_reason}",
         )
 
     prev_status = rec.status
@@ -268,6 +324,29 @@ def execute_positioning_recommendation(
         rec.status = "CANCELLED"
         rec.execution_status = "CANCELLED_BY_OPERATOR"
     else:
+        # Re-verify resource operational availability before dispatching to staging
+        is_eligible, ineligibility_reason = verify_resource_eligibility_for_positioning(db, rec.resource_id)
+        if not is_eligible:
+            rec.status = "FAILED"
+            rec.execution_status = "EXECUTION_ABORTED_RESOURCE_UNAVAILABLE"
+            rec.updated_at = now
+            audit = PositioningAuditLog(
+                log_uuid=str(uuid.uuid4()),
+                recommendation_id=rec.id,
+                actor_id=user.id,
+                action="EXECUTION_FAILED",
+                previous_status=prev_status,
+                new_status="FAILED",
+                details_json=json.dumps({"reason": ineligibility_reason}),
+                created_at=now,
+            )
+            db.add(audit)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Execution rejected: {ineligibility_reason}",
+            )
+
         rec.status = "EXECUTED"
         rec.execution_status = "STAGING_MISSION_DISPATCHED"
         rec.execution_requested_at = now
