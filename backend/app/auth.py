@@ -74,17 +74,34 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def create_access_token(payload: dict) -> str:
-    """Create a tamper-evident signed token (Base64 JSON + HMAC-SHA256 signature)."""
-    data = payload.copy()
-    data["exp"] = int(time.time()) + TOKEN_EXPIRY_SECONDS
-    encoded_payload = base64.urlsafe_b64encode(json.dumps(data).encode("utf-8")).decode("utf-8").rstrip("=")
-    key = get_secret_key()
-    signature = hmac.new(key.encode("utf-8"), encoded_payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    return f"{encoded_payload}.{signature}"
+    """Create an RFC 7519 HS256 JWT access token via app.identity.jwt_handler."""
+    from app.identity.jwt_handler import create_access_token as _jwt_create_token
+    user_id = payload.get("sub", "")
+    email = payload.get("email", "")
+    role = payload.get("role", "user")
+    org_ids = payload.get("org_ids", [])
+    extra = {k: v for k, v in payload.items() if k not in ("sub", "email", "role", "org_ids", "exp", "iat", "iss", "aud", "type")}
+    return _jwt_create_token(user_id=user_id, email=email, role=role, org_ids=org_ids, extra_claims=extra)
 
 
 def decode_access_token(token: str) -> Optional[dict]:
-    """Verify signature and expiration of access token."""
+    """Verify signature and expiration. Supports new PyJWT tokens first, then legacy HMAC tokens."""
+    # 1. Try PyJWT
+    try:
+        from app.identity.jwt_handler import decode_access_token as _jwt_decode
+        payload = _jwt_decode(token)
+        if payload and "sub" in payload:
+            return {
+                "sub": int(payload["sub"]) if str(payload["sub"]).isdigit() else payload["sub"],
+                "email": payload.get("email", ""),
+                "role": payload.get("role", "user"),
+                "org_ids": payload.get("org_ids", []),
+                "exp": payload.get("exp"),
+            }
+    except Exception:
+        pass
+
+    # 2. Fall back to legacy 2-segment HMAC
     try:
         parts = token.split(".")
         if len(parts) != 2:
@@ -129,13 +146,18 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found.",
         )
+    if hasattr(user, "is_active") and not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is deactivated.",
+        )
     return user
 
 
 def get_current_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    if current_user.role != "admin":
+    if current_user.role not in ("admin", "super_admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrative privileges required to access this resource.",
@@ -152,4 +174,7 @@ def get_optional_user(
     payload = decode_access_token(credentials.credentials)
     if not payload or "sub" not in payload:
         return None
-    return db.query(User).filter(User.id == payload["sub"]).first()
+    user = db.query(User).filter(User.id == payload["sub"]).first()
+    if user and hasattr(user, "is_active") and not user.is_active:
+        return None
+    return user

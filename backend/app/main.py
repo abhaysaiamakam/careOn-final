@@ -68,6 +68,9 @@ from app.algorithms.prediction import predict_resource_shortage_risk
 from app.chatbot.sahara import process_sahara_message
 from app.rate_limiter import rate_limit
 from app.models import make_point_wkt
+from app.routers.auth import router as auth_router
+from app.routers.identity import router as identity_router
+from app.routers.organizations import router as organizations_router
 
 
 @asynccontextmanager
@@ -135,6 +138,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Milestone 2 Routers: Extended Auth, Identity/Sessions, and Multi-Organizations
+app.include_router(auth_router)
+app.include_router(identity_router)
+app.include_router(organizations_router)
+
 
 # ==============================================================================
 # System & Health
@@ -197,7 +205,14 @@ def register(payload: UserRegister, db: Session = Depends(get_db), _rl: None = D
         role="user",
     )
     token = create_access_token({"sub": user.id, "email": user.email, "role": user.role})
-    return TokenResponse(access_token=token, token_type="Bearer", user=UserResponse.model_validate(user))
+    raw_refresh = None
+    try:
+        from app.identity.refresh_tokens import create_refresh_token_record
+        raw_refresh, _ = create_refresh_token_record(db, user_id=user.id, session_id=None, device_hint="web")
+        db.commit()
+    except Exception:
+        pass
+    return TokenResponse(access_token=token, token_type="Bearer", refresh_token=raw_refresh, user=UserResponse.model_validate(user))
 
 
 @app.post("/api/auth/login", response_model=TokenResponse, tags=["Auth"])
@@ -208,8 +223,20 @@ def login(payload: UserLogin, db: Session = Depends(get_db), _rl: None = Depends
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
         )
+    if hasattr(user, "is_active") and not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is deactivated.",
+        )
     token = create_access_token({"sub": user.id, "email": user.email, "role": user.role})
-    return TokenResponse(access_token=token, token_type="Bearer", user=UserResponse.model_validate(user))
+    raw_refresh = None
+    try:
+        from app.identity.refresh_tokens import create_refresh_token_record
+        raw_refresh, _ = create_refresh_token_record(db, user_id=user.id, session_id=None, device_hint="web")
+        db.commit()
+    except Exception:
+        pass
+    return TokenResponse(access_token=token, token_type="Bearer", refresh_token=raw_refresh, user=UserResponse.model_validate(user))
 
 
 @app.get("/api/auth/me", response_model=UserResponse, tags=["Auth"])

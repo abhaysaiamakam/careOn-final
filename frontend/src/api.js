@@ -16,16 +16,32 @@ export const getApiBase = () => {
 
 const API_BASE = getApiBase();
 
+// In-memory token storage (XSS protection: access tokens kept in memory)
+let _inMemoryToken = null;
+
+export function setInMemoryToken(token) {
+  _inMemoryToken = token;
+}
+
+export function clearInMemoryToken() {
+  _inMemoryToken = null;
+}
+
+export function getInMemoryToken() {
+  return _inMemoryToken;
+}
+
 /**
  * Returns auth headers.
+ * Prefers in-memory token for XSS security, falls back to localStorage.
  * Supports dual simultaneous sessions:
  * - 'admin': uses careon_admin_token
  * - 'user': uses careon_user_token
  * - 'auto': detects based on current URL path
  */
 export function getAuthHeaders(scope = 'auto') {
-  let token = null;
-  if (typeof localStorage !== 'undefined') {
+  let token = _inMemoryToken;
+  if (!token && typeof localStorage !== 'undefined') {
     if (scope === 'admin') {
       token = localStorage.getItem('careon_admin_token') || localStorage.getItem('careon_token');
     } else if (scope === 'user') {

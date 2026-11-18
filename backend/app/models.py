@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Index,
+    UniqueConstraint,
     text,
     types as sqla_types,
 )
@@ -107,10 +108,19 @@ class User(Base):
     trust_score = Column(String(30), nullable=False, default="Unverified")  # Unverified, Mistaken, Confirmed Genuine, Confirmed Misuse
     trust_notes = Column(Text, nullable=True)
     is_flagged = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=utc_now)
 
     incidents = relationship("Incident", back_populates="user")
     notifications = relationship("Notification", back_populates="user")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    organization_memberships = relationship(
+        "OrganizationMembership",
+        back_populates="user",
+        foreign_keys="OrganizationMembership.user_id",
+        cascade="all, delete-orphan",
+    )
 
 
 class Incident(Base):
@@ -365,3 +375,91 @@ class Emergency(Base):
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+# ==============================================================================
+# Milestone 2 — Identity, Session & Multi-Organization Models
+# ==============================================================================
+class RefreshToken(Base):
+    """
+    Stores SHA-256 hashed refresh tokens.
+    Raw tokens are never persisted. Token family tracking enables immediate
+    invalidation of all descended tokens when reuse (theft) is detected.
+    """
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, index=True, nullable=False)
+    family_id = Column(String(32), index=True, nullable=False)
+    session_id = Column(String(64), index=True, nullable=True)
+    device_hint = Column(String(200), nullable=True)
+    is_revoked = Column(Boolean, default=False, nullable=False, index=True)
+    revoked_reason = Column(String(50), nullable=True)  # rotated, logout, reuse_detected, expired
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="refresh_tokens")
+
+
+class UserSession(Base):
+    """
+    Tracks client sessions across devices with device hints and activity timestamps.
+    """
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(64), unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_hint = Column(String(200), nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    last_seen_at = Column(DateTime, default=utc_now)
+    created_at = Column(DateTime, default=utc_now)
+    expires_at = Column(DateTime, nullable=False)
+
+    user = relationship("User", back_populates="sessions")
+
+
+class Organization(Base):
+    """
+    Emergency service organization record (e.g. Ambulance Service, Hospital, Fire, Police).
+    """
+    __tablename__ = "organizations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    org_type = Column(String(50), nullable=False)  # ambulance_service, hospital, fire, police, disaster_response, other
+    description = Column(Text, nullable=True)
+    contact_email = Column(String(120), nullable=True)
+    contact_phone = Column(String(30), nullable=True)
+    location_name = Column(String(200), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    memberships = relationship("OrganizationMembership", back_populates="organization", cascade="all, delete-orphan")
+
+
+class OrganizationMembership(Base):
+    """
+    User membership within an organization, supporting organization-scoped roles.
+    """
+    __tablename__ = "organization_memberships"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_org_user_membership"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    membership_role = Column(String(30), nullable=False, default="member")  # member, dispatcher, admin
+    status = Column(String(20), nullable=False, default="active")  # active, inactive, pending
+    joined_at = Column(DateTime, default=utc_now)
+    invited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    organization = relationship("Organization", back_populates="memberships")
+    user = relationship("User", back_populates="organization_memberships", foreign_keys=[user_id])
+

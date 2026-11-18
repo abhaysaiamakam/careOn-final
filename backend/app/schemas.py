@@ -28,6 +28,7 @@ class UserResponse(BaseModel):
     role: str
     trust_score: str
     is_flagged: bool
+    is_active: Optional[bool] = True
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -36,6 +37,7 @@ class UserResponse(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "Bearer"
+    refresh_token: Optional[str] = None
     user: UserResponse
 
 
@@ -398,3 +400,123 @@ class HealthResponse(BaseModel):
     database: str
     timestamp: str
     version: str
+
+
+# ==============================================================================
+# Milestone 2 — Identity, RBAC & Multi-Organization Schemas
+# ==============================================================================
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+    confirm_password: str
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=120)
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8)
+    confirm_password: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+
+class TokenPairResponse(BaseModel):
+    access_token: str
+    refresh_token: Optional[str] = None
+    token_type: str = "Bearer"
+    expires_in: int = 1800  # 30 min in seconds
+    user: UserResponse
+
+
+class UserProfileUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=30)
+
+
+class UserStatusUpdate(BaseModel):
+    is_active: bool
+    reason: Optional[str] = None
+
+
+class UserRoleUpdate(BaseModel):
+    role: str = Field(..., description="citizen, dispatcher, responder, hospital_staff, org_admin, super_admin")
+
+
+class OrganizationCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    org_type: str = Field(..., min_length=2, max_length=50)
+    description: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    location_name: Optional[str] = None
+
+
+class OrganizationUpdate(BaseModel):
+    name: Optional[str] = None
+    org_type: Optional[str] = None
+    description: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    location_name: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_verified: Optional[bool] = None
+
+
+class OrganizationResponse(BaseModel):
+    id: int
+    name: str
+    org_type: str
+    description: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    location_name: Optional[str] = None
+    is_active: bool
+    is_verified: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MembershipCreate(BaseModel):
+    user_id: int
+    membership_role: str = Field(default="member", pattern="^(member|dispatcher|admin)$")
+
+
+class MembershipUpdate(BaseModel):
+    membership_role: Optional[str] = Field(default=None, pattern="^(member|dispatcher|admin)$")
+    status: Optional[str] = Field(default=None, pattern="^(active|inactive|pending)$")
+
+
+class MembershipResponse(BaseModel):
+    id: int
+    organization_id: int
+    user_id: int
+    membership_role: str
+    status: str
+    joined_at: datetime
+    user: Optional[UserResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SessionResponse(BaseModel):
+    session_id: str
+    device_hint: Optional[str] = None
+    ip_address: Optional[str] = None
+    is_active: bool
+    last_seen_at: datetime
+    created_at: datetime
+    expires_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
