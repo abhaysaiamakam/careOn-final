@@ -894,5 +894,200 @@ class NotificationDeliveryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ==============================================================================
+# Milestone 7 — Hospital Readiness, Capacity & Coordination Schemas
+# ==============================================================================
+
+class HospitalFacilityCreate(BaseModel):
+    organization_id: int
+    facility_code: str = Field(..., min_length=3, max_length=30)
+    name: str = Field(..., min_length=2, max_length=120)
+    facility_type: str = Field("General Hospital", max_length=50)
+    location_name: str = Field(..., max_length=200)
+    latitude: float = Field(..., ge=-90.0, le=90.0)
+    longitude: float = Field(..., ge=-180.0, le=180.0)
+    trauma_level: str = Field("Level 2", max_length=30)
+    capabilities: str = Field("emergency,trauma,icu,ct_scan,blood_bank,ambulance_bay")
+    specialist_services: Optional[str] = Field("trauma_surgeon,cardiologist,neurologist,anesthesiologist")
+    medical_equipment: Optional[str] = Field("ct_scanner,mri,ventilators,defibrillators,dialysis")
+    ambulance_bays: int = Field(4, ge=0)
+    operating_status: str = Field("operational", max_length=30)
+    emergency_phone: Optional[str] = Field(None, max_length=30)
+    escalation_contact: Optional[str] = Field(None, max_length=100)
+
+
+class HospitalFacilityUpdate(BaseModel):
+    name: Optional[str] = None
+    facility_type: Optional[str] = None
+    location_name: Optional[str] = None
+    latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
+    longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
+    trauma_level: Optional[str] = None
+    capabilities: Optional[str] = None
+    specialist_services: Optional[str] = None
+    medical_equipment: Optional[str] = None
+    ambulance_bays: Optional[int] = Field(None, ge=0)
+    operating_status: Optional[str] = None
+    emergency_phone: Optional[str] = None
+    escalation_contact: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class HospitalFacilityResponse(BaseModel):
+    id: int
+    organization_id: int
+    facility_code: str
+    name: str
+    facility_type: str
+    location_name: str
+    latitude: float
+    longitude: float
+    trauma_level: str
+    capabilities: str
+    specialist_services: Optional[str] = None
+    medical_equipment: Optional[str] = None
+    ambulance_bays: int
+    operating_status: str
+    emergency_phone: Optional[str] = None
+    escalation_contact: Optional[str] = None
+    is_active: bool
+    last_verified_at: datetime
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HospitalCapacityUpdateRequest(BaseModel):
+    category: str = Field(..., description="er_beds, trauma_bays, icu_beds, ventilators, etc.")
+    total: int = Field(..., ge=0)
+    occupied: int = Field(..., ge=0)
+    unavailable: int = Field(0, ge=0)
+    reporting_source: str = Field("staff_manual", max_length=50)
+    notes: Optional[str] = None
+
+
+class HospitalCapacityResponse(BaseModel):
+    id: int
+    facility_id: int
+    category: str
+    total_capacity: int
+    occupied_capacity: int
+    reserved_capacity: int
+    unavailable_capacity: int
+    available_capacity: int
+    reporting_source: str
+    verification_status: str
+    notes: Optional[str] = None
+    last_updated: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HospitalCapacityReservationRequest(BaseModel):
+    facility_id: int
+    incident_id: int
+    assignment_id: Optional[int] = None
+    category: str = Field("er_beds", max_length=50)
+    quantity: int = Field(1, ge=1)
+    expires_in_seconds: int = Field(1800, ge=60, le=86400)
+
+
+class HospitalCapacityReservationResponse(BaseModel):
+    id: int
+    reservation_token: str
+    facility_id: int
+    incident_id: int
+    assignment_id: Optional[int] = None
+    category: str
+    quantity: int
+    status: str
+    expires_at: datetime
+    released_at: Optional[datetime] = None
+    release_reason: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FacilityDiversionUpdateRequest(BaseModel):
+    new_status: str = Field(..., description="open, partial_diversion, full_diversion, closed, emergency_only")
+    reason: str = Field(..., min_length=3)
+    diversion_type: Optional[str] = Field(None, description="trauma, pediatric, ct_down, ed_saturation, staffing")
+    effective_until: Optional[datetime] = None
+
+
+class IncomingPatientCreateRequest(BaseModel):
+    facility_id: int
+    incident_id: int
+    assignment_id: Optional[int] = None
+    emergency_severity: str = Field("High", max_length=30)
+    patient_condition_summary: Optional[str] = Field(None, max_length=255)
+    eta_minutes: Optional[float] = None
+    eta_source: Optional[str] = None
+    deadline_seconds: int = Field(600, ge=60, le=3600)
+
+
+class IncomingPatientResponseAction(BaseModel):
+    action: str = Field(..., description="'acknowledge', 'accept', 'decline', or 'clarify'")
+    reason: Optional[str] = Field(None, description="Mandatory when action is 'decline'")
+    clarification_notes: Optional[str] = Field(None, description="Mandatory when action is 'clarify'")
+    reserve_er_bed: bool = True
+    reserve_trauma_bay: bool = False
+    reserve_icu_bed: bool = False
+
+
+class IncomingPatientRequestResponse(BaseModel):
+    id: int
+    request_token: str
+    facility_id: int
+    incident_id: int
+    assignment_id: Optional[int] = None
+    dispatcher_id: Optional[int] = None
+    status: str
+    emergency_severity: str
+    patient_condition_summary: Optional[str] = None
+    eta_minutes: Optional[float] = None
+    eta_source: Optional[str] = None
+    hospital_response_user_id: Optional[int] = None
+    hospital_response_reason: Optional[str] = None
+    clarification_notes: Optional[str] = None
+    acknowledgement_deadline: datetime
+    responded_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FacilityReadinessAssessmentResponse(BaseModel):
+    facility_id: int
+    facility_code: str
+    facility_name: str
+    organization_id: int
+    latitude: float
+    longitude: float
+    distance_km: float
+    eta_minutes: float
+    eta_source: str
+    operating_status: str
+    classification: str
+    score: float
+    er_beds_available: int
+    trauma_bays_available: int
+    icu_beds_available: int
+    incoming_patients_count: int
+    capacity_freshness: str
+    has_confirmed: bool
+    matched_capabilities: List[str]
+    missing_capabilities: List[str]
+    explanations: List[str]
+
+
+class MCIDistributionRequest(BaseModel):
+    incident_id: int
+    patient_severities: List[str] = Field(..., min_length=1)
+
+
+
 
 

@@ -452,6 +452,7 @@ class Organization(Base):
 
     memberships = relationship("OrganizationMembership", back_populates="organization", cascade="all, delete-orphan")
     readiness = relationship("HospitalReadiness", back_populates="organization", uselist=False, cascade="all, delete-orphan")
+    facilities = relationship("HospitalFacility", back_populates="organization", cascade="all, delete-orphan")
 
 
 class OrganizationMembership(Base):
@@ -700,6 +701,177 @@ class ResponderTelemetryLog(Base):
 
     resource = relationship("Resource")
     user = relationship("User")
+
+
+# ==============================================================================
+# Milestone 7 — Hospital Facilities, Dynamic Capacity & Coordination Models
+# ==============================================================================
+class HospitalFacility(Base):
+    """
+    Physical hospital facility profile under an Organization.
+    Tracks precise geospatial coordinates, trauma/ICU capabilities, operating status,
+    and emergency intake configurations.
+    """
+    __tablename__ = "hospital_facilities"
+    __table_args__ = (
+        Index("idx_hospital_facilities_geom", "geom", postgresql_using="gist"),
+        Index("ix_hospital_facilities_org", "organization_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    facility_code = Column(String(30), unique=True, index=True, nullable=False)
+    name = Column(String(120), nullable=False)
+    facility_type = Column(String(50), nullable=False, default="General Hospital")
+    location_name = Column(String(200), nullable=False)
+    latitude = Column(Float, nullable=False, default=12.3052)
+    longitude = Column(Float, nullable=False, default=76.6552)
+    geom = Column(SpatialPoint, nullable=True)
+    trauma_level = Column(String(30), nullable=False, default="Level 2")  # Level 1, Level 2, Level 3, None
+    capabilities = Column(String(255), nullable=False, default="emergency,trauma,icu,ct_scan,blood_bank,ambulance_bay")
+    specialist_services = Column(String(255), nullable=True, default="trauma_surgeon,cardiologist,neurologist,anesthesiologist")
+    medical_equipment = Column(String(255), nullable=True, default="ct_scanner,mri,ventilators,defibrillators,dialysis")
+    ambulance_bays = Column(Integer, nullable=False, default=4)
+    operating_status = Column(String(30), nullable=False, default="operational")  # operational, limited, closed, diversion
+    emergency_phone = Column(String(30), nullable=True)
+    escalation_contact = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    last_verified_at = Column(DateTime, default=utc_now, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    organization = relationship("Organization", back_populates="facilities")
+    capacities = relationship("HospitalCapacity", back_populates="facility", cascade="all, delete-orphan")
+    reservations = relationship("HospitalCapacityReservation", back_populates="facility", cascade="all, delete-orphan")
+    incoming_requests = relationship("IncomingPatientRequest", back_populates="facility", cascade="all, delete-orphan")
+    diversion_logs = relationship("HospitalDiversionLog", back_populates="facility", cascade="all, delete-orphan")
+
+
+class HospitalCapacity(Base):
+    """
+    Granular, independently tracked hospital capacity per category (ER beds, Trauma bays, ICU, etc.).
+    Maintains total, occupied, reserved, and temporarily unavailable counts with freshness status.
+    """
+    __tablename__ = "hospital_capacities"
+    __table_args__ = (
+        UniqueConstraint("facility_id", "category", name="uq_facility_capacity_category"),
+        Index("ix_hospital_capacities_facility", "facility_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    facility_id = Column(Integer, ForeignKey("hospital_facilities.id", ondelete="CASCADE"), nullable=False, index=True)
+    category = Column(String(50), nullable=False)  # er_beds, trauma_bays, icu_beds, critical_care_beds, ventilators, oxygen_beds, specialists
+    total_capacity = Column(Integer, nullable=False, default=0)
+    occupied_capacity = Column(Integer, nullable=False, default=0)
+    reserved_capacity = Column(Integer, nullable=False, default=0)
+    unavailable_capacity = Column(Integer, nullable=False, default=0)
+    reporting_source = Column(String(50), nullable=False, default="staff_manual")  # staff_manual, hmis_integration, automated_sensor
+    verification_status = Column(String(30), nullable=False, default="verified_current")  # verified_current, reported_unverified, aging, stale, unknown
+    notes = Column(Text, nullable=True)
+    last_updated = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    facility = relationship("HospitalFacility", back_populates="capacities")
+    updated_by_user = relationship("User", foreign_keys=[updated_by_user_id])
+
+    @property
+    def available_capacity(self) -> int:
+        return max(0, self.total_capacity - self.occupied_capacity - self.reserved_capacity - self.unavailable_capacity)
+
+
+class HospitalCapacityReservation(Base):
+    """
+    Atomic capacity reservation linked to an incoming emergency patient / assignment.
+    Prevents overbooking and ensures database-level concurrency protection.
+    """
+    __tablename__ = "hospital_capacity_reservations"
+    __table_args__ = (
+        Index("ix_hospital_reservations_facility_status", "facility_id", "status"),
+        Index("ix_hospital_reservations_incident", "incident_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    reservation_token = Column(String(36), unique=True, index=True, nullable=False)
+    facility_id = Column(Integer, ForeignKey("hospital_facilities.id", ondelete="CASCADE"), nullable=False, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignment_id = Column(Integer, ForeignKey("assignments.id", ondelete="SET NULL"), nullable=True, index=True)
+    category = Column(String(50), nullable=False, default="er_beds")
+    quantity = Column(Integer, nullable=False, default=1)
+    status = Column(String(30), default="active", nullable=False)  # active, fulfilled, released, expired, cancelled
+    expires_at = Column(DateTime, nullable=False)
+    released_at = Column(DateTime, nullable=True)
+    release_reason = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    facility = relationship("HospitalFacility", back_populates="reservations")
+    incident = relationship("Incident")
+    assignment = relationship("Assignment")
+    created_by_user = relationship("User", foreign_keys=[created_by_user_id])
+
+
+class IncomingPatientRequest(Base):
+    """
+    Hospital pre-arrival coordination request lifecycle.
+    Tracks dispatcher destination selection, hospital review/acknowledgement/acceptance/decline,
+    and capacity reservation linking.
+    """
+    __tablename__ = "incoming_patient_requests"
+    __table_args__ = (
+        Index("ix_incoming_requests_facility_status", "facility_id", "status"),
+        Index("ix_incoming_requests_incident", "incident_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_token = Column(String(36), unique=True, index=True, nullable=False)
+    facility_id = Column(Integer, ForeignKey("hospital_facilities.id", ondelete="CASCADE"), nullable=False, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignment_id = Column(Integer, ForeignKey("assignments.id", ondelete="CASCADE"), nullable=True, index=True)
+    dispatcher_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(30), default="pending", nullable=False)  # pending, acknowledged, accepted, declined, needs_clarification, expired, cancelled
+    emergency_severity = Column(String(30), nullable=False, default="High")  # Critical, High, Medium, Low
+    patient_condition_summary = Column(String(255), nullable=True)  # Strictly non-PII operational summary
+    eta_minutes = Column(Float, nullable=True)
+    eta_source = Column(String(50), nullable=True)
+    hospital_response_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    hospital_response_reason = Column(Text, nullable=True)
+    clarification_notes = Column(Text, nullable=True)
+    capacity_snapshot_json = Column(Text, nullable=True)
+    acknowledgement_deadline = Column(DateTime, nullable=False)
+    responded_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    facility = relationship("HospitalFacility", back_populates="incoming_requests")
+    incident = relationship("Incident")
+    assignment = relationship("Assignment")
+    dispatcher = relationship("User", foreign_keys=[dispatcher_id])
+    hospital_response_user = relationship("User", foreign_keys=[hospital_response_user_id])
+
+
+class HospitalDiversionLog(Base):
+    """
+    Immutable audit history of hospital diversion state transitions.
+    Supports full diversion, partial diversion, capability-specific restrictions, and closures.
+    """
+    __tablename__ = "hospital_diversion_logs"
+    __table_args__ = (
+        Index("ix_diversion_logs_facility", "facility_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    facility_id = Column(Integer, ForeignKey("hospital_facilities.id", ondelete="CASCADE"), nullable=False, index=True)
+    previous_status = Column(String(50), nullable=True)
+    new_status = Column(String(50), nullable=False)  # open, partial_diversion, full_diversion, closed, emergency_only
+    diversion_type = Column(String(50), nullable=True)  # trauma, pediatric, ct_down, ed_saturation, staffing
+    reason = Column(Text, nullable=False)
+    effective_from = Column(DateTime, default=utc_now, nullable=False)
+    effective_until = Column(DateTime, nullable=True)
+    authorized_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    facility = relationship("HospitalFacility", back_populates="diversion_logs")
+    authorized_by_user = relationship("User", foreign_keys=[authorized_by_user_id])
+
 
 
 
