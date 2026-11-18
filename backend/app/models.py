@@ -176,6 +176,11 @@ class Incident(Base):
     cancellation = relationship("Cancellation", back_populates="incident", uselist=False, cascade="all, delete-orphan")
     feedback = relationship("Feedback", back_populates="incident", uselist=False, cascade="all, delete-orphan")
     verification_logs = relationship("VerificationLog", back_populates="incident", cascade="all, delete-orphan")
+    collaborations = relationship("IncidentAgencyCollaboration", back_populates="incident", cascade="all, delete-orphan")
+    command_structures = relationship("IncidentCommandStructure", back_populates="incident", cascade="all, delete-orphan")
+    operational_tasks = relationship("AgencyOperationalTask", back_populates="incident", cascade="all, delete-orphan")
+    resource_requests = relationship("AgencyResourceRequest", back_populates="incident", cascade="all, delete-orphan")
+    operational_zones = relationship("IncidentOperationalZone", back_populates="incident", cascade="all, delete-orphan")
 
 
 class IncidentUpdate(Base):
@@ -454,6 +459,7 @@ class Organization(Base):
     memberships = relationship("OrganizationMembership", back_populates="organization", cascade="all, delete-orphan")
     readiness = relationship("HospitalReadiness", back_populates="organization", uselist=False, cascade="all, delete-orphan")
     facilities = relationship("HospitalFacility", back_populates="organization", cascade="all, delete-orphan")
+    classification = relationship("AgencyClassification", back_populates="organization", uselist=False, cascade="all, delete-orphan")
 
 
 class OrganizationMembership(Base):
@@ -1455,6 +1461,301 @@ class CoverageSnapshotRecord(Base):
     created_at = Column(DateTime, default=utc_now, nullable=False)
 
     organization = relationship("Organization")
+
+
+# ==============================================================================
+# Milestone 11 — Multi-Agency Coordination & Unified Incident Command Models
+# ==============================================================================
+
+class AgencyClassification(Base):
+    """
+    Formal emergency agency classification attached to an Organization.
+    Preserves M2 organization identity while adding agency type, radio channels,
+    hotlines, jurisdiction, and mutual-aid metadata.
+    """
+    __tablename__ = "agency_classifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    agency_type = Column(String(50), nullable=False)  # EMS, POLICE, FIRE_RESCUE, DISASTER_RESPONSE, HOSPITAL, EMERGENCY_COMMAND, OTHER
+    jurisdiction = Column(String(200), nullable=True)
+    dispatch_hotline = Column(String(40), nullable=True)
+    radio_channel = Column(String(40), nullable=True)
+    capabilities_json = Column(Text, nullable=True)
+    is_mutual_aid_signatory = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    organization = relationship("Organization", back_populates="classification")
+
+
+class IncidentAgencyCollaboration(Base):
+    """
+    Controlled inter-agency collaboration relationship binding an agency to an emergency incident.
+    Enforces that knowing an incident ID grants zero access without an active collaboration record.
+    """
+    __tablename__ = "incident_agency_collaborations"
+    __table_args__ = (
+        UniqueConstraint("incident_id", "organization_id", name="uq_incident_agency_collab"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    collaboration_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    collaboration_status = Column(String(30), default="INVITED", nullable=False, index=True)  # INVITED, ACCEPTED, ACTIVE, SUSPENDED, REVOKED, COMPLETED
+    inviting_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+    inviting_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at = Column(DateTime, nullable=True)
+    collaboration_purpose = Column(Text, nullable=False)
+    expires_at = Column(DateTime, nullable=True)
+    revoked_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    revoked_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    incident = relationship("Incident", back_populates="collaborations")
+    organization = relationship("Organization", foreign_keys=[organization_id])
+    inviting_organization = relationship("Organization", foreign_keys=[inviting_organization_id])
+    inviting_user = relationship("User", foreign_keys=[inviting_user_id])
+    accepted_by = relationship("User", foreign_keys=[accepted_by_user_id])
+    revoked_by = relationship("User", foreign_keys=[revoked_by_user_id])
+    information_grants = relationship("IncidentInformationGrant", back_populates="collaboration", cascade="all, delete-orphan")
+
+
+class IncidentInformationGrant(Base):
+    """
+    Granular, scope-based information sharing permission per participating agency.
+    Deny-by-default: only explicitly granted scopes are accessible.
+    """
+    __tablename__ = "incident_information_grants"
+    __table_args__ = (
+        UniqueConstraint("collaboration_id", "scope", name="uq_collab_scope_grant"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    grant_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    collaboration_id = Column(Integer, ForeignKey("incident_agency_collaborations.id", ondelete="CASCADE"), nullable=False, index=True)
+    scope = Column(String(60), nullable=False)  # INCIDENT_SUMMARY, OPERATIONAL_LOCATION, HAZARD_INFORMATION, RESOURCE_STATUS, AGENCY_TASKS, CASUALTY_COUNTS, HOSPITAL_DESTINATION, CLINICAL_HANDOVER_REFERENCE, COMMAND_INFORMATION, OPERATIONAL_DOCUMENTS
+    is_granted = Column(Boolean, default=True, nullable=False)
+    granted_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    granted_at = Column(DateTime, default=utc_now, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+    collaboration = relationship("IncidentAgencyCollaboration", back_populates="information_grants")
+    granted_by = relationship("User", foreign_keys=[granted_by_user_id])
+
+
+class IncidentCommandStructure(Base):
+    """
+    Incident Command System (ICS) structure governing incident command authority.
+    Invariant: Exactly one active incident commander per active command structure at any time.
+    """
+    __tablename__ = "incident_command_structures"
+
+    id = Column(Integer, primary_key=True, index=True)
+    command_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    structure_type = Column(String(40), default="SINGLE_COMMAND", nullable=False)  # SINGLE_COMMAND, UNIFIED_COMMAND
+    lead_agency_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    activation_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    incident = relationship("Incident", back_populates="command_structures")
+    lead_agency = relationship("Organization", foreign_keys=[lead_agency_id])
+    assignments = relationship("IncidentCommandAssignment", back_populates="command_structure", cascade="all, delete-orphan")
+    histories = relationship("IncidentCommandHistory", back_populates="command_structure", cascade="all, delete-orphan")
+
+
+class IncidentCommandAssignment(Base):
+    """
+    Role assignments under an Incident Command Structure.
+    Command roles: INCIDENT_COMMANDER, DEPUTY_COMMANDER, SAFETY_OFFICER, LIAISON_OFFICER,
+    PUBLIC_INFO_OFFICER, OPERATIONS_CHIEF, PLANNING_CHIEF, LOGISTICS_CHIEF, FINANCE_CHIEF,
+    EMS_BRANCH_DIRECTOR, FIRE_BRANCH_DIRECTOR, POLICE_BRANCH_DIRECTOR
+    """
+    __tablename__ = "incident_command_assignments"
+    __table_args__ = (
+        Index("ix_cmd_active_role", "command_structure_id", "command_role", "is_active"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    assignment_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    command_structure_id = Column(Integer, ForeignKey("incident_command_structures.id", ondelete="CASCADE"), nullable=False, index=True)
+    command_role = Column(String(50), nullable=False)
+    assigned_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    assigned_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    radio_callsign = Column(String(50), nullable=True)
+    contact_number = Column(String(40), nullable=True)
+    assigned_at = Column(DateTime, default=utc_now, nullable=False)
+    relieved_at = Column(DateTime, nullable=True)
+    relieved_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    command_structure = relationship("IncidentCommandStructure", back_populates="assignments")
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    assigned_organization = relationship("Organization", foreign_keys=[assigned_organization_id])
+    relieved_by = relationship("User", foreign_keys=[relieved_by_user_id])
+
+
+class IncidentCommandHistory(Base):
+    """
+    Immutable audit log of command structure transitions, transfers, and emergency succession.
+    """
+    __tablename__ = "incident_command_histories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    history_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    command_structure_id = Column(Integer, ForeignKey("incident_command_structures.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type = Column(String(50), nullable=False)  # ESTABLISHED, COMMANDER_TRANSFERRED, ROLE_ASSIGNED, ROLE_RELIEVED, EMERGENCY_SUCCESSION, STRUCTURE_TERMINATED
+    previous_commander_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    new_commander_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    authorizing_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    briefing_summary = Column(Text, nullable=True)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    command_structure = relationship("IncidentCommandStructure", back_populates="histories")
+    previous_commander = relationship("User", foreign_keys=[previous_commander_id])
+    new_commander = relationship("User", foreign_keys=[new_commander_id])
+    authorizing_user = relationship("User", foreign_keys=[authorizing_user_id])
+
+
+class AgencyOperationalTask(Base):
+    """
+    Cross-agency or intra-incident task assignment managed under unified command.
+    Status: DRAFT, REQUESTED, ACKNOWLEDGED, IN_PROGRESS, BLOCKED, COMPLETED, REJECTED, CANCELLED, EXPIRED
+    """
+    __tablename__ = "agency_operational_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    command_structure_id = Column(Integer, ForeignKey("incident_command_structures.id", ondelete="SET NULL"), nullable=True, index=True)
+    assigning_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    assigned_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    priority = Column(String(20), default="MEDIUM", nullable=False)  # LOW, MEDIUM, HIGH, CRITICAL
+    status = Column(String(30), default="REQUESTED", nullable=False, index=True)
+    assigned_unit_name = Column(String(100), nullable=True)
+    deadline = Column(DateTime, nullable=True)
+    acknowledged_at = Column(DateTime, nullable=True)
+    acknowledged_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    completed_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    status_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    incident = relationship("Incident", back_populates="operational_tasks")
+    command_structure = relationship("IncidentCommandStructure")
+    assigning_organization = relationship("Organization", foreign_keys=[assigning_organization_id])
+    assigned_organization = relationship("Organization", foreign_keys=[assigned_organization_id])
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+    acknowledged_by = relationship("User", foreign_keys=[acknowledged_by_user_id])
+    completed_by = relationship("User", foreign_keys=[completed_by_user_id])
+
+
+class AgencyResourceRequest(Base):
+    """
+    Mutual aid request between agencies.
+    Status: REQUESTED, ACKNOWLEDGED, ACCEPTED, DECLINED, FULFILLED, CANCELLED, EXPIRED
+    Operational constraint: A resource request is NEVER an automatic dispatch order.
+    The receiving agency retains operational sovereignty to accept, decline, or fulfill.
+    """
+    __tablename__ = "agency_resource_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    requesting_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    resource_type = Column(String(50), nullable=False)  # AMBULANCE, FIRE_TRUCK, HAZMAT_UNIT, POLICE_PATROL, RESCUE_SQUAD, HELICOPTER, WATER_TANKER, OTHER
+    quantity = Column(Integer, default=1, nullable=False)
+    urgency = Column(String(20), default="ROUTINE", nullable=False)  # ROUTINE, URGENT, EMERGENCY, LIFE_THREATENING
+    status = Column(String(30), default="REQUESTED", nullable=False, index=True)
+    operational_justification = Column(Text, nullable=False)
+    staging_location_name = Column(String(200), nullable=True)
+    staging_latitude = Column(Float, nullable=True)
+    staging_longitude = Column(Float, nullable=True)
+    decision_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    decision_at = Column(DateTime, nullable=True)
+    decision_notes = Column(Text, nullable=True)
+    assigned_resource_ids_json = Column(Text, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    incident = relationship("Incident", back_populates="resource_requests")
+    requesting_organization = relationship("Organization", foreign_keys=[requesting_organization_id])
+    requested_organization = relationship("Organization", foreign_keys=[requested_organization_id])
+    requested_by = relationship("User", foreign_keys=[requested_by_user_id])
+    decision_by = relationship("User", foreign_keys=[decision_by_user_id])
+
+
+class IncidentOperationalZone(Base):
+    """
+    Geospatial operational zone for incident management.
+    Zone types: INCIDENT_PERIMETER, HOT_ZONE, WARM_ZONE, COLD_ZONE, STAGING_AREA,
+    EVACUATION_ZONE, ACCESS_RESTRICTED_ZONE, HAZARD_ZONE, SAFE_ASSEMBLY_AREA
+    """
+    __tablename__ = "incident_operational_zones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    zone_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    zone_type = Column(String(50), nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    center_latitude = Column(Float, nullable=True)
+    center_longitude = Column(Float, nullable=True)
+    radius_meters = Column(Float, nullable=True)
+    polygon_geojson = Column(Text, nullable=True)
+    hazard_type = Column(String(100), nullable=True)
+    access_restrictions = Column(String(200), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    incident = relationship("Incident", back_populates="operational_zones")
+    created_by_organization = relationship("Organization", foreign_keys=[created_by_organization_id])
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+
+
+class InterAgencyAuditLog(Base):
+    """
+    Immutable audit log of all inter-agency interactions, grants, accesses, and decisions.
+    """
+    __tablename__ = "inter_agency_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    audit_uuid = Column(String(36), unique=True, index=True, nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    acting_organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    acting_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    action_type = Column(String(60), nullable=False, index=True)
+    target_agency_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+    target_resource_type = Column(String(50), nullable=True)
+    target_resource_id = Column(String(100), nullable=True)
+    details_json = Column(Text, nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=utc_now, nullable=False, index=True)
+
+    incident = relationship("Incident")
+    acting_organization = relationship("Organization", foreign_keys=[acting_organization_id])
+    acting_user = relationship("User", foreign_keys=[acting_user_id])
+    target_agency = relationship("Organization", foreign_keys=[target_agency_id])
+
 
 
 

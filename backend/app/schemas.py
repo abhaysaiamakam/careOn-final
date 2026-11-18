@@ -1750,6 +1750,326 @@ class ModelHealthResponse(BaseModel):
     alerts: List[str]
 
 
+# ==============================================================================
+# Milestone 11 — Multi-Agency Coordination & Unified Incident Command Schemas
+# ==============================================================================
+
+class AgencyClassificationCreate(BaseModel):
+    agency_type: str = Field(..., description="EMS, POLICE, FIRE_RESCUE, DISASTER_RESPONSE, HOSPITAL, EMERGENCY_COMMAND, OTHER")
+    jurisdiction: Optional[str] = None
+    dispatch_hotline: Optional[str] = None
+    radio_channel: Optional[str] = None
+    capabilities_json: Optional[str] = None
+    is_mutual_aid_signatory: bool = True
+
+
+class AgencyClassificationUpdate(BaseModel):
+    agency_type: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    dispatch_hotline: Optional[str] = None
+    radio_channel: Optional[str] = None
+    capabilities_json: Optional[str] = None
+    is_mutual_aid_signatory: Optional[bool] = None
+
+
+class AgencyClassificationResponse(BaseModel):
+    id: int
+    organization_id: int
+    agency_type: str
+    jurisdiction: Optional[str] = None
+    dispatch_hotline: Optional[str] = None
+    radio_channel: Optional[str] = None
+    capabilities_json: Optional[str] = None
+    is_mutual_aid_signatory: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentCollaborationInviteRequest(BaseModel):
+    target_organization_id: int
+    collaboration_purpose: str = Field(..., min_length=3)
+    initial_scopes: List[str] = Field(default_factory=lambda: ["INCIDENT_SUMMARY", "OPERATIONAL_LOCATION"])
+    expires_hours: Optional[int] = Field(24, ge=1, le=168)
+
+
+class IncidentCollaborationActionRequest(BaseModel):
+    status: str = Field(..., description="ACCEPTED, SUSPENDED, REVOKED, COMPLETED")
+    reason: Optional[str] = None
+
+
+class IncidentCollaborationResponse(BaseModel):
+    id: int
+    collaboration_uuid: str
+    incident_id: int
+    organization_id: int
+    organization_name: Optional[str] = None
+    organization_type: Optional[str] = None
+    collaboration_status: str
+    collaboration_purpose: str
+    inviting_organization_id: Optional[int] = None
+    inviting_organization_name: Optional[str] = None
+    accepted_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    revoked_reason: Optional[str] = None
+    active_scopes: List[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InformationGrantRequest(BaseModel):
+    scopes_to_grant: List[str] = Field(default_factory=list)
+    scopes_to_revoke: List[str] = Field(default_factory=list)
+
+
+class InformationGrantResponse(BaseModel):
+    grant_uuid: str
+    collaboration_id: int
+    scope: str
+    is_granted: bool
+    granted_at: datetime
+    revoked_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentCommandCreateRequest(BaseModel):
+    structure_type: str = Field("SINGLE_COMMAND", description="SINGLE_COMMAND or UNIFIED_COMMAND")
+    lead_agency_id: int
+    activation_notes: Optional[str] = None
+    initial_commander_user_id: int
+    radio_callsign: Optional[str] = None
+    contact_number: Optional[str] = None
+
+
+class IncidentCommandTransferRequest(BaseModel):
+    new_commander_user_id: int
+    new_commander_org_id: int
+    briefing_summary: str = Field(..., min_length=5)
+    radio_callsign: Optional[str] = None
+    contact_number: Optional[str] = None
+
+
+class IncidentCommandSuccessionRequest(BaseModel):
+    new_commander_user_id: int
+    new_commander_org_id: int
+    reason: str = Field(..., min_length=5)
+    briefing_summary: Optional[str] = None
+
+
+class IncidentCommandAssignRoleRequest(BaseModel):
+    command_role: str = Field(..., description="DEPUTY_COMMANDER, SAFETY_OFFICER, LIAISON_OFFICER, OPERATIONS_CHIEF, PLANNING_CHIEF, LOGISTICS_CHIEF, FINANCE_CHIEF, EMS_BRANCH_DIRECTOR, etc.")
+    assigned_user_id: int
+    assigned_org_id: int
+    radio_callsign: Optional[str] = None
+    contact_number: Optional[str] = None
+
+
+class IncidentCommandAssignmentResponse(BaseModel):
+    assignment_uuid: str
+    command_structure_id: int
+    command_role: str
+    assigned_user_id: int
+    assigned_user_name: Optional[str] = None
+    assigned_organization_id: int
+    assigned_organization_name: Optional[str] = None
+    is_active: bool
+    radio_callsign: Optional[str] = None
+    contact_number: Optional[str] = None
+    assigned_at: datetime
+    relieved_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentCommandHistoryResponse(BaseModel):
+    history_uuid: str
+    event_type: str
+    previous_commander_id: Optional[int] = None
+    new_commander_id: Optional[int] = None
+    authorizing_user_id: Optional[int] = None
+    briefing_summary: Optional[str] = None
+    reason: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentCommandStructureResponse(BaseModel):
+    command_uuid: str
+    incident_id: int
+    structure_type: str
+    lead_agency_id: int
+    lead_agency_name: Optional[str] = None
+    is_active: bool
+    activation_notes: Optional[str] = None
+    active_commander: Optional[IncidentCommandAssignmentResponse] = None
+    assignments: List[IncidentCommandAssignmentResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgencyTaskCreateRequest(BaseModel):
+    assigned_organization_id: int
+    title: str = Field(..., min_length=3, max_length=200)
+    description: str = Field(..., min_length=5)
+    priority: str = Field("MEDIUM", description="LOW, MEDIUM, HIGH, CRITICAL")
+    assigned_unit_name: Optional[str] = None
+    deadline: Optional[datetime] = None
+
+
+class AgencyTaskUpdateRequest(BaseModel):
+    status: Optional[str] = Field(None, description="ACKNOWLEDGED, IN_PROGRESS, BLOCKED, COMPLETED, REJECTED, CANCELLED")
+    assigned_unit_name: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    status_notes: Optional[str] = None
+
+
+class AgencyTaskResponse(BaseModel):
+    id: int
+    task_uuid: str
+    incident_id: int
+    command_structure_id: Optional[int] = None
+    assigning_organization_id: int
+    assigning_organization_name: Optional[str] = None
+    assigned_organization_id: int
+    assigned_organization_name: Optional[str] = None
+    created_by_user_id: int
+    created_by_name: Optional[str] = None
+    title: str
+    description: str
+    priority: str
+    status: str
+    assigned_unit_name: Optional[str] = None
+    deadline: Optional[datetime] = None
+    acknowledged_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    status_notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgencyResourceRequestCreate(BaseModel):
+    requested_organization_id: int
+    resource_type: str = Field(..., description="AMBULANCE, FIRE_TRUCK, HAZMAT_UNIT, POLICE_PATROL, RESCUE_SQUAD, HELICOPTER, WATER_TANKER, OTHER")
+    quantity: int = Field(1, ge=1, le=50)
+    urgency: str = Field("ROUTINE", description="ROUTINE, URGENT, EMERGENCY, LIFE_THREATENING")
+    operational_justification: str = Field(..., min_length=5)
+    staging_location_name: Optional[str] = None
+    staging_latitude: Optional[float] = None
+    staging_longitude: Optional[float] = None
+    expires_hours: Optional[int] = Field(6, ge=1, le=72)
+
+
+class AgencyResourceRequestAction(BaseModel):
+    action: str = Field(..., description="ACKNOWLEDGE, ACCEPT, DECLINE, FULFILL, CANCEL")
+    decision_notes: Optional[str] = None
+    assigned_resource_ids: Optional[List[str]] = None
+
+
+class AgencyResourceRequestResponse(BaseModel):
+    id: int
+    request_uuid: str
+    incident_id: int
+    requesting_organization_id: int
+    requesting_organization_name: Optional[str] = None
+    requested_organization_id: int
+    requested_organization_name: Optional[str] = None
+    resource_type: str
+    quantity: int
+    urgency: str
+    status: str
+    operational_justification: str
+    staging_location_name: Optional[str] = None
+    staging_latitude: Optional[float] = None
+    staging_longitude: Optional[float] = None
+    decision_notes: Optional[str] = None
+    assigned_resource_ids: List[str] = Field(default_factory=list)
+    expires_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentOperationalZoneCreate(BaseModel):
+    zone_type: str = Field(..., description="INCIDENT_PERIMETER, HOT_ZONE, WARM_ZONE, COLD_ZONE, STAGING_AREA, EVACUATION_ZONE, ACCESS_RESTRICTED_ZONE, HAZARD_ZONE, SAFE_ASSEMBLY_AREA")
+    name: str = Field(..., min_length=2, max_length=100)
+    description: Optional[str] = None
+    center_latitude: Optional[float] = None
+    center_longitude: Optional[float] = None
+    radius_meters: Optional[float] = None
+    polygon_geojson: Optional[str] = None
+    hazard_type: Optional[str] = None
+    access_restrictions: Optional[str] = None
+
+
+class IncidentOperationalZoneResponse(BaseModel):
+    zone_uuid: str
+    incident_id: int
+    created_by_organization_id: int
+    created_by_organization_name: Optional[str] = None
+    zone_type: str
+    name: str
+    description: Optional[str] = None
+    center_latitude: Optional[float] = None
+    center_longitude: Optional[float] = None
+    radius_meters: Optional[float] = None
+    polygon_geojson: Optional[str] = None
+    hazard_type: Optional[str] = None
+    access_restrictions: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OperationalPictureResponse(BaseModel):
+    incident_id: int
+    requesting_agency_id: int
+    granted_scopes: List[str]
+    summary: Optional[Dict[str, Any]] = None
+    location: Optional[Dict[str, Any]] = None
+    hazard_information: Optional[List[Dict[str, Any]]] = None
+    participating_agencies: List[Dict[str, Any]] = Field(default_factory=list)
+    resource_status: Optional[List[Dict[str, Any]]] = None
+    agency_tasks: Optional[List[Dict[str, Any]]] = None
+    casualty_counts: Optional[Dict[str, Any]] = None
+    hospital_destinations: Optional[List[Dict[str, Any]]] = None
+    clinical_handover_reference: Optional[Dict[str, Any]] = None
+    command_information: Optional[Dict[str, Any]] = None
+    operational_zones: Optional[List[Dict[str, Any]]] = None
+
+
+class InterAgencyAuditResponse(BaseModel):
+    audit_uuid: str
+    incident_id: int
+    acting_organization_id: int
+    acting_organization_name: Optional[str] = None
+    acting_user_id: int
+    acting_user_name: Optional[str] = None
+    action_type: str
+    target_agency_id: Optional[int] = None
+    target_agency_name: Optional[str] = None
+    target_resource_type: Optional[str] = None
+    target_resource_id: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+
 
 
 
