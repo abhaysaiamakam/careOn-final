@@ -11,8 +11,45 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 
-SECRET_KEY = os.getenv("CAREON_SECRET_KEY", "careon-super-secret-key-2026-demo")
+INSECURE_DEFAULT_SECRET = "careon-super-secret-key-2026-demo"
+DEV_FALLBACK_SECRET = "careon-dev-only-secret-key-not-for-production"
 TOKEN_EXPIRY_SECONDS = 86400 * 7  # 7 days
+
+
+def validate_and_get_secret_key(environment: Optional[str] = None, secret_override: Optional[str] = None) -> str:
+    """
+    Validate and return the secret key for token signing.
+    Strictly forbids missing or insecure default keys in production environments.
+    """
+    env = (environment if environment is not None else os.getenv("CAREON_ENV", os.getenv("ENVIRONMENT", "development"))).lower()
+    is_prod = env in ("production", "prod")
+    secret = secret_override if secret_override is not None else os.getenv("CAREON_SECRET_KEY")
+
+    if is_prod:
+        if not secret:
+            raise RuntimeError(
+                "CRITICAL SECURITY CONFIGURATION ERROR: CAREON_SECRET_KEY environment variable must be set in production."
+            )
+        if secret == INSECURE_DEFAULT_SECRET:
+            raise RuntimeError(
+                "CRITICAL SECURITY CONFIGURATION ERROR: The known default demo secret key is strictly forbidden in production."
+            )
+        if len(secret) < 32:
+            raise RuntimeError(
+                "CRITICAL SECURITY CONFIGURATION ERROR: CAREON_SECRET_KEY must be at least 32 characters in production."
+            )
+        return secret
+
+    if secret:
+        return secret
+    return DEV_FALLBACK_SECRET
+
+
+def get_secret_key() -> str:
+    return validate_and_get_secret_key()
+
+
+SECRET_KEY = get_secret_key()
 
 security = HTTPBearer(auto_error=False)
 
@@ -41,7 +78,8 @@ def create_access_token(payload: dict) -> str:
     data = payload.copy()
     data["exp"] = int(time.time()) + TOKEN_EXPIRY_SECONDS
     encoded_payload = base64.urlsafe_b64encode(json.dumps(data).encode("utf-8")).decode("utf-8").rstrip("=")
-    signature = hmac.new(SECRET_KEY.encode("utf-8"), encoded_payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    key = get_secret_key()
+    signature = hmac.new(key.encode("utf-8"), encoded_payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{encoded_payload}.{signature}"
 
 
@@ -52,7 +90,8 @@ def decode_access_token(token: str) -> Optional[dict]:
         if len(parts) != 2:
             return None
         encoded_payload, signature = parts
-        expected_sig = hmac.new(SECRET_KEY.encode("utf-8"), encoded_payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        key = get_secret_key()
+        expected_sig = hmac.new(key.encode("utf-8"), encoded_payload.encode("utf-8"), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature, expected_sig):
             return None
         # Add padding back if necessary

@@ -8,6 +8,8 @@ from sqlalchemy import (
     Float,
     Boolean,
     ForeignKey,
+    Index,
+    text,
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -40,6 +42,7 @@ class Incident(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     incident_code = Column(String(40), unique=True, index=True, nullable=False)
+    tracking_token = Column(String(64), unique=True, index=True, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     category = Column(String(60), nullable=False)  # Medical, Road accident, Fire, Rescue, Safety / Other, Disaster / Multiple affected people
     title = Column(String(200), nullable=False)
@@ -120,6 +123,15 @@ class Resource(Base):
 
 class Assignment(Base):
     __tablename__ = "assignments"
+    __table_args__ = (
+        Index(
+            "uq_active_assignment_resource",
+            "resource_id",
+            unique=True,
+            sqlite_where=text("status = 'Active'"),
+            postgresql_where=text("status = 'Active'"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False)

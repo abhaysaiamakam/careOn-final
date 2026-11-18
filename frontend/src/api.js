@@ -219,6 +219,15 @@ export async function fetchIncidentDetails(idOrCode, scope = 'auto') {
   return res.json();
 }
 
+export async function fetchPublicTracking(trackingToken) {
+  const res = await fetch(`${API_BASE}/incidents/track/${encodeURIComponent(trackingToken)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Incident tracking record not found.');
+  }
+  return res.json();
+}
+
 export async function verifyIncidentOtp(incidentId, otp, scope = 'auto') {
   const res = await fetch(`${API_BASE}/incidents/${incidentId}/verify`, {
     method: 'POST',

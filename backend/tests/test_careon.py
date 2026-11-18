@@ -201,7 +201,7 @@ def test_allocation_recommendation_and_conflict_prevention(client):
     assert conf_res.status_code == 200
 
     # Verify incident status is updated to Team Dispatched
-    updated_inc = client.get(f"/api/incidents/{inc_id}").json()
+    updated_inc = client.get(f"/api/incidents/{inc_id}", headers=headers).json()
     assert updated_inc["status"] == "Team Dispatched"
 
     # CONFLICT PREVENTION CHECK:
@@ -252,7 +252,7 @@ def test_shortage_detection_and_external_provider_flow(client):
     provider = providers[1]
 
     # Create enquiry for CARE-2026-103
-    inc_103 = client.get("/api/incidents/CARE-2026-103").json()
+    inc_103 = client.get("/api/incidents/CARE-2026-103", headers=headers).json()
     enquiry_res = client.post(
         "/api/providers/enquiries",
         json={
@@ -286,9 +286,16 @@ def test_cancellation_and_safe_resource_release(client):
         "password": "admin123",
     })
     admin_token = admin_login.json()["access_token"]
-    headers = {"Authorization": f"Bearer {admin_token}"}
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    # Create and dispatch an incident
+    user_login = client.post("/api/auth/login", json={
+        "email": "aastha@example.com",
+        "password": "user123",
+    })
+    user_token = user_login.json()["access_token"]
+    user_headers = {"Authorization": f"Bearer {user_token}"}
+
+    # Create incident as authenticated user
     inc = client.post("/api/incidents", json={
         "category": "Medical",
         "description": "Patient dizzy, recovering.",
@@ -297,12 +304,13 @@ def test_cancellation_and_safe_resource_release(client):
         "help_required": "First Aid",
         "contact_name": "Deepak",
         "contact_phone": "+91 95555 44444",
-    }).json()
+    }, headers=user_headers).json()
 
-    # User cancels with reason
+    # User cancels their own incident with reason
     cancel_res = client.post(
         f"/api/incidents/{inc['id']}/cancel",
         json={"reason": "Help arranged independently", "details": "Family took patient to nearby clinic."},
+        headers=user_headers,
     )
     assert cancel_res.status_code == 200
     assert cancel_res.json()["status"] == "Cancelled"
@@ -310,7 +318,7 @@ def test_cancellation_and_safe_resource_release(client):
     # Admin acknowledges cancellation and releases resources
     ack_res = client.post(
         f"/api/incidents/{inc['id']}/acknowledge-cancellation",
-        headers=headers,
+        headers=admin_headers,
     )
     assert ack_res.status_code == 200
 

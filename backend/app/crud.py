@@ -1,8 +1,10 @@
 import re
+import secrets
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 
 from app.models import (
     User,
@@ -257,6 +259,7 @@ def seed_demo_data(db: Session):
             # 1. Critical Medical Incident (Active Dispatch)
             Incident(
                 incident_code="CARE-2026-101",
+                tracking_token="demo-tracking-token-care-2026-101",
                 user_id=demo_user.id,
                 category="Medical",
                 title="Acute Cardiac Arrest Emergency",
@@ -277,6 +280,7 @@ def seed_demo_data(db: Session):
             # 2. Road Accident Incident (Pending Verification)
             Incident(
                 incident_code="CARE-2026-102",
+                tracking_token="demo-tracking-token-care-2026-102",
                 user_id=demo_user.id,
                 category="Road accident",
                 title="Two-Wheeler & Auto Collision",
@@ -297,6 +301,7 @@ def seed_demo_data(db: Session):
             # 3. Fire Incident (Assistance Search / Shortage demo)
             Incident(
                 incident_code="CARE-2026-103",
+                tracking_token="demo-tracking-token-care-2026-103",
                 user_id=None,
                 category="Fire",
                 title="Commercial Kitchen Electrical Fire",
@@ -317,6 +322,7 @@ def seed_demo_data(db: Session):
             # 4. Disaster Incident (Relief Coordination)
             Incident(
                 incident_code="CARE-2026-104",
+                tracking_token="demo-tracking-token-care-2026-104",
                 user_id=None,
                 category="Disaster / Multiple affected people",
                 title="Flash Flood Waterlogging in Low-lying Colony",
@@ -339,6 +345,7 @@ def seed_demo_data(db: Session):
             # 5. Resolved Incident with Feedback
             Incident(
                 incident_code="CARE-2026-105",
+                tracking_token="demo-tracking-token-care-2026-105",
                 user_id=demo_user.id,
                 category="Medical",
                 title="Heat Exhaustion Collapse in Public Park",
@@ -553,9 +560,11 @@ def create_incident(
 
     # Title generation
     title = f"{payload.category} Emergency - {payload.location_name}"
+    tracking_token = secrets.token_urlsafe(32)
 
     incident = Incident(
         incident_code=incident_code,
+        tracking_token=tracking_token,
         user_id=user_id,
         category=payload.category,
         title=title,
@@ -671,6 +680,12 @@ def get_incident_by_id_or_code(db: Session, identifier: str) -> Optional[Inciden
     if identifier.isdigit():
         return db.query(Incident).filter(Incident.id == int(identifier)).first()
     return db.query(Incident).filter(Incident.incident_code == identifier.upper().strip()).first()
+
+
+def get_incident_by_tracking_token(db: Session, tracking_token: str) -> Optional[Incident]:
+    if not tracking_token:
+        return None
+    return db.query(Incident).filter(Incident.tracking_token == tracking_token.strip()).first()
 
 
 def verify_incident(
@@ -811,12 +826,14 @@ def cancel_incident(
     reason: str,
     cancelled_by: str,
     details: Optional[str] = None,
+    actor_name: Optional[str] = None,
 ) -> Optional[Incident]:
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
     if not incident:
         return None
 
     incident.status = "Cancelled"
+    effective_actor = actor_name or cancelled_by
 
     cancellation = Cancellation(
         incident_id=incident.id,
@@ -824,7 +841,7 @@ def cancel_incident(
         details=details,
         cancelled_by=cancelled_by,
         acknowledged_by_admin=(cancelled_by == "admin"),
-        resources_safely_released=False,
+        resources_safely_released=(cancelled_by == "admin"),
     )
     db.add(cancellation)
 
@@ -832,7 +849,7 @@ def cancel_incident(
         incident_id=incident.id,
         status="Cancelled",
         message=f"Request cancelled by {cancelled_by}. Reason: {reason}. Resources flagged for safe release.",
-        actor=cancelled_by,
+        actor=effective_actor,
     ))
 
     # Notify admin
@@ -840,8 +857,17 @@ def cancel_incident(
         user_id=None,
         incident_id=incident.id,
         title=f"⚠️ Incident Cancelled: {incident.incident_code}",
-        message=f"Reporter cancelled {incident.incident_code} (Reason: {reason}). Please confirm safe resource release.",
+        message=f"{effective_actor} cancelled {incident.incident_code} (Reason: {reason}). Please confirm safe resource release.",
         type="warning",
+    ))
+
+    # Audit log
+    db.add(AuditLog(
+        action="INCIDENT_CANCELLED",
+        entity_type="Incident",
+        entity_id=incident.incident_code,
+        actor=effective_actor,
+        details=f"Cancelled by {cancelled_by} ({effective_actor}). Reason: {reason}",
     ))
 
     # Safe release if admin cancels directly
@@ -978,14 +1004,27 @@ def confirm_assignment(
     notes: Optional[str] = None,
 ) -> Assignment:
     """
-    CRITICAL: Strict conflict prevention logic.
-    - Ensures resource is available
-    - Ensures no active assignment exists
-    - Ensures incident is valid and not already resolved/cancelled
+    CRITICAL: Transaction-safe conflict prevention and resource assignment.
+    - Ensures incident is valid and not already resolved/cancelled/rejected
+    - Ensures incident does not already have an active assignment
+    - Atomically verifies resource availability and claims it (status = 'Assigned')
+    - Protected by partial unique index on Assignment(resource_id WHERE status='Active')
+    - Rolls back completely upon any concurrency conflict or error
     """
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
     if not incident:
         raise ValueError("Incident not found.")
+
+    if incident.status in ("Resolved", "Cancelled", "Rejected"):
+        raise ValueError(f"Cannot assign resource to incident with status '{incident.status}'.")
+
+    active_inc_assignment = (
+        db.query(Assignment)
+        .filter(Assignment.incident_id == incident.id, Assignment.status == "Active")
+        .first()
+    )
+    if active_inc_assignment:
+        raise ValueError(f"Incident {incident.incident_code} already has an active resource assigned.")
 
     resource = db.query(Resource).filter(Resource.id == resource_id).first()
     if not resource:
@@ -994,7 +1033,7 @@ def confirm_assignment(
     if resource.status != "Available":
         raise ValueError(f"Resource {resource.name} is currently {resource.status} and cannot be assigned.")
 
-    # Backend check: No existing active assignment for this resource
+    # Check active assignment on resource
     active_res_assignment = (
         db.query(Assignment)
         .filter(Assignment.resource_id == resource.id, Assignment.status == "Active")
@@ -1003,56 +1042,70 @@ def confirm_assignment(
     if active_res_assignment:
         raise ValueError(f"Resource conflict: {resource.name} is already assigned to active incident #{active_res_assignment.incident_id}.")
 
-    # Create new assignment
-    assignment = Assignment(
-        incident_id=incident.id,
-        resource_id=resource.id,
-        assigned_by=assigned_by,
-        status="Active",
-        notes=notes or f"Assigned by coordinator {assigned_by}",
-    )
-    db.add(assignment)
-
-    # Update resource state
-    resource.status = "Assigned"
-    resource.current_assignment_id = incident.id
-
-    # Update incident state: Assignment Confirmed -> Team Dispatched
-    incident.status = "Team Dispatched"
-    eta_mins = calculate_eta_minutes(
-        calculate_haversine_distance(
-            incident.latitude, incident.longitude, resource.latitude, resource.longitude
+    # Atomic conditional update on Resource table - ensures only 1 concurrent process can claim this resource
+    rows_updated = (
+        db.query(Resource)
+        .filter(Resource.id == resource_id, Resource.status == "Available")
+        .update(
+            {"status": "Assigned", "current_assignment_id": incident.id},
+            synchronize_session=False,
         )
     )
+    if rows_updated == 0:
+        raise ValueError(f"Resource conflict: {resource.name} is no longer available.")
 
-    db.add(IncidentUpdate(
-        incident_id=incident.id,
-        status="Team Dispatched",
-        message=f"Resource {resource.name} ({resource.category}) confirmed and dispatched. Estimated ETA ~{eta_mins} mins.",
-        actor=assigned_by,
-    ))
-
-    # User notification
-    if incident.user_id:
-        db.add(Notification(
-            user_id=incident.user_id,
+    try:
+        assignment = Assignment(
             incident_id=incident.id,
-            title=f"Help Dispatched for {incident.incident_code}",
-            message=f"{incident.contact_name}, {resource.name} has been dispatched to your location. ETA ~{eta_mins} mins.",
-            type="alert",
+            resource_id=resource.id,
+            assigned_by=assigned_by,
+            status="Active",
+            notes=notes or f"Assigned by coordinator {assigned_by}",
+        )
+        db.add(assignment)
+
+        # Update incident state: Assignment Confirmed -> Team Dispatched
+        incident.status = "Team Dispatched"
+        eta_mins = calculate_eta_minutes(
+            calculate_haversine_distance(
+                incident.latitude, incident.longitude, resource.latitude, resource.longitude
+            )
+        )
+
+        db.add(IncidentUpdate(
+            incident_id=incident.id,
+            status="Team Dispatched",
+            message=f"Resource {resource.name} ({resource.category}) confirmed and dispatched. Estimated ETA ~{eta_mins} mins.",
+            actor=assigned_by,
         ))
 
-    db.add(AuditLog(
-        action="ASSIGNMENT_CONFIRMED",
-        entity_type="Assignment",
-        entity_id=f"INC-{incident.incident_code}-RES-{resource.resource_code}",
-        actor=assigned_by,
-        details=f"Assigned {resource.name} to {incident.incident_code}.",
-    ))
+        # User notification
+        if incident.user_id:
+            db.add(Notification(
+                user_id=incident.user_id,
+                incident_id=incident.id,
+                title=f"Help Dispatched for {incident.incident_code}",
+                message=f"{incident.contact_name}, {resource.name} has been dispatched to your location. ETA ~{eta_mins} mins.",
+                type="alert",
+            ))
 
-    db.commit()
-    db.refresh(assignment)
-    return assignment
+        db.add(AuditLog(
+            action="ASSIGNMENT_CONFIRMED",
+            entity_type="Assignment",
+            entity_id=f"INC-{incident.incident_code}-RES-{resource.resource_code}",
+            actor=assigned_by,
+            details=f"Assigned {resource.name} to {incident.incident_code}.",
+        ))
+
+        db.commit()
+        db.refresh(assignment)
+        return assignment
+    except IntegrityError as e:
+        db.rollback()
+        raise ValueError(f"Resource conflict: {resource.name} already has an active assignment.") from e
+    except Exception:
+        db.rollback()
+        raise
 
 
 def release_assignment(db: Session, assignment_id: int, actor: str) -> Optional[Assignment]:

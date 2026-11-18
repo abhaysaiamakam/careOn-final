@@ -145,6 +145,7 @@ class FeedbackResponse(BaseModel):
 class IncidentResponse(BaseModel):
     id: int
     incident_code: str
+    tracking_token: Optional[str] = None
     user_id: Optional[int] = None
     category: str
     title: str
@@ -177,6 +178,29 @@ class IncidentDetailResponse(IncidentResponse):
     assignments: List[AssignmentResponse] = []
     provider_enquiries: List[ProviderEnquiryResponse] = []
     feedback: Optional[FeedbackResponse] = None
+
+
+class IncidentPublicTrackingUpdateItem(BaseModel):
+    status: str
+    message: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncidentPublicTrackingResponse(BaseModel):
+    """Sanitized public tracking response that never leaks PII, phone, or private medical details."""
+    incident_code: str
+    category: str
+    status: str
+    priority: str
+    location_name: str
+    is_verified: bool
+    created_at: datetime
+    updated_at: datetime
+    updates: List[IncidentPublicTrackingUpdateItem] = []
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==============================================================================

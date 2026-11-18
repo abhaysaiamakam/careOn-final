@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
@@ -14,6 +15,7 @@ from app.auth import (
     get_current_admin,
     get_optional_user,
     create_access_token,
+    validate_and_get_secret_key,
 )
 from app.schemas import (
     # Auth
@@ -29,6 +31,8 @@ from app.schemas import (
     IncidentCancel,
     IncidentResponse,
     IncidentDetailResponse,
+    IncidentPublicTrackingResponse,
+    IncidentPublicTrackingUpdateItem,
     # Resources
     ResourceCreate,
     ResourceUpdate,
@@ -66,6 +70,8 @@ from app.chatbot.sahara import process_sahara_message
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Validate secret key configuration at server startup
+    validate_and_get_secret_key()
     # Ensure tables exist and seed demo data on startup
     Base.metadata.create_all(bind=engine)
     db = next(get_db())
@@ -83,10 +89,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS setup: allow all origins so multiple local network devices (e.g. Android phone, other laptops) can access
+# CORS configuration: strict in production, multi-device permissive in development
+ALLOWED_ORIGINS_ENV = os.getenv("ALLOWED_ORIGINS")
+if ALLOWED_ORIGINS_ENV:
+    cors_origins = [orig.strip() for orig in ALLOWED_ORIGINS_ENV.split(",") if orig.strip()]
+elif os.getenv("CAREON_ENV", os.getenv("ENVIRONMENT", "development")).lower() in ("production", "prod"):
+    cors_origins = ["https://careon.org", "https://app.careon.org"]
+else:
+    cors_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -114,11 +128,10 @@ def health_check(db: Session = Depends(get_db)):
     try:
         db.execute(text("SELECT 1"))
         db_status = "connected"
-    except Exception as e:
-        db_status = f"unhealthy: {str(e)}"
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"status": "degraded", "database": db_status},
+            detail={"status": "degraded", "database": "database connection unavailable"},
         )
 
     return HealthResponse(
@@ -220,33 +233,65 @@ def list_incidents(
     )
 
 
+@app.get("/api/incidents/track/{tracking_token}", response_model=IncidentPublicTrackingResponse, tags=["Incidents"])
+def track_incident_public(
+    tracking_token: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Public restricted tracking endpoint for citizens using a cryptographically unguessable tracking credential.
+    Exposes only status and sanitized updates without leaking personal patient data, contact details, or internal notes.
+    """
+    incident = crud.get_incident_by_tracking_token(db, tracking_token)
+    if not incident:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Incident tracking record not found for the provided credential.",
+        )
+    public_updates = [
+        IncidentPublicTrackingUpdateItem(
+            status=u.status,
+            message=u.message,
+            created_at=u.created_at,
+        )
+        for u in (incident.updates or [])
+        if u.is_public
+    ]
+    return IncidentPublicTrackingResponse(
+        incident_code=incident.incident_code,
+        category=incident.category,
+        status=incident.status,
+        priority=incident.priority,
+        location_name=incident.location_name,
+        is_verified=incident.is_verified,
+        created_at=incident.created_at,
+        updated_at=incident.updated_at,
+        updates=public_updates,
+    )
+
+
 @app.get("/api/incidents/{identifier}", response_model=IncidentDetailResponse, tags=["Incidents"])
 def get_incident_details(
     identifier: str,
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Retrieve full incident details by numeric ID or incident code with privacy protection."""
+    """Retrieve full incident details by numeric ID or incident code with strict authorization."""
     item = crud.get_incident_by_id_or_code(db, identifier)
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Incident '{identifier}' not found.",
         )
-    # Privacy check: Regular user cannot view another user's private emergency record
-    if current_user and current_user.role != "admin" and item.user_id and item.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: You cannot view another user's private emergency incident.",
-        )
-    return item
-    """Retrieve full incident details by numeric ID or incident code (e.g. CARE-2026-101)."""
-    item = crud.get_incident_by_id_or_code(db, identifier)
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Incident '{identifier}' not found.",
-        )
+    # Authorization check:
+    # Admins and dispatchers can access any incident.
+    # Regular users can only access incidents they reported.
+    if current_user.role != "admin":
+        if item.user_id is None or item.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot view another user's private emergency incident.",
+            )
     return item
 
 
@@ -319,23 +364,45 @@ def update_priority(
 def cancel_incident_endpoint(
     incident_id: int,
     payload: IncidentCancel,
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """User-initiated or admin cancellation with reason."""
-    actor = "admin" if (current_user and current_user.role == "admin") else "user"
-    cancelled = crud.cancel_incident(
-        db=db,
-        incident_id=incident_id,
-        reason=payload.reason,
-        cancelled_by=actor,
-        details=payload.details,
-    )
-    if not cancelled:
+    """
+    User-initiated or admin cancellation with reason.
+    Strictly verifies authentication and incident ownership.
+    """
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if not incident:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Incident #{incident_id} not found.",
         )
+
+    # Ownership check: Ordinary users may only cancel their own incidents
+    if current_user.role != "admin":
+        if incident.user_id is None or incident.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You can only cancel incidents you reported.",
+            )
+
+    # Check terminal status
+    if incident.status in ("Resolved", "Cancelled", "Rejected"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel incident that is already {incident.status}.",
+        )
+
+    actor_role = "admin" if current_user.role == "admin" else "user"
+    actor_name = current_user.name
+    cancelled = crud.cancel_incident(
+        db=db,
+        incident_id=incident_id,
+        reason=payload.reason,
+        cancelled_by=actor_role,
+        details=payload.details,
+        actor_name=actor_name,
+    )
     return cancelled
 
 
@@ -668,8 +735,21 @@ def get_shortage_predictions(
 
 
 @app.post("/api/simulation/reset", tags=["Simulation"])
-def reset_simulation(db: Session = Depends(get_db)):
-    """Reset the database to clean demo state for repeatable presentation."""
+def reset_simulation(
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Reset the database to clean demo state for repeatable presentation.
+    Strictly restricted to authenticated administrators in development/testing environments.
+    Disabled in production.
+    """
+    env = os.getenv("CAREON_ENV", os.getenv("ENVIRONMENT", "development")).lower()
+    if env in ("production", "prod"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Simulation reset is disabled in production environments.",
+        )
     # Delete all records and reseed
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -723,8 +803,21 @@ def update_emergency_status(
     return updated
 
 
-@app.delete("/api/emergencies/{emergency_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Emergencies"])
-def delete_emergency(emergency_id: int, db: Session = Depends(get_db)):
+@app.delete(
+    "/api/emergencies/{emergency_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Legacy Emergencies (Deprecated)"],
+    deprecated=True,
+)
+def delete_emergency(
+    emergency_id: int,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    [DEPRECATED] Delete an emergency record from the legacy hospital-room system.
+    Requires administrator authorization.
+    """
     success = crud.delete_emergency(db, emergency_id)
     if not success:
         raise HTTPException(

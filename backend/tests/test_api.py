@@ -165,7 +165,7 @@ def test_update_status_not_found(client):
 
 
 def test_delete_emergency(client):
-    """Test deleting an emergency record."""
+    """Test deleting an emergency record requires admin authorization."""
     # Create an emergency
     payload = {
         "patient_name": "Clark Kent",
@@ -176,8 +176,20 @@ def test_delete_emergency(client):
     create_res = client.post("/api/emergencies", json=payload)
     item_id = create_res.json()["id"]
 
-    # Delete it
-    del_res = client.delete(f"/api/emergencies/{item_id}")
+    # Unauthenticated deletion must fail with HTTP 401
+    unauth_del = client.delete(f"/api/emergencies/{item_id}")
+    assert unauth_del.status_code == 401
+
+    # Authenticate as admin
+    admin_login = client.post("/api/auth/login", json={
+        "email": "admin@careon.org",
+        "password": "admin123",
+    })
+    admin_token = admin_login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Delete with admin authorization
+    del_res = client.delete(f"/api/emergencies/{item_id}", headers=headers)
     assert del_res.status_code == 204
 
     # Verify it is deleted
@@ -186,6 +198,18 @@ def test_delete_emergency(client):
 
 
 def test_delete_emergency_not_found(client):
-    """Test deleting non-existent emergency returns 404."""
-    response = client.delete("/api/emergencies/99999")
+    """Test deleting non-existent emergency returns 404 for authorized admin, 401 for unauthenticated."""
+    # Unauthenticated must fail with 401
+    unauth_res = client.delete("/api/emergencies/99999")
+    assert unauth_res.status_code == 401
+
+    # Authenticated admin gets 404 Not Found
+    admin_login = client.post("/api/auth/login", json={
+        "email": "admin@careon.org",
+        "password": "admin123",
+    })
+    admin_token = admin_login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    response = client.delete("/api/emergencies/99999", headers=headers)
     assert response.status_code == 404
