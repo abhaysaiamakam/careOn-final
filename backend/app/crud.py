@@ -1,10 +1,12 @@
 import re
 import secrets
-from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+import logging
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
+from geoalchemy2 import Geography
 
 from app.models import (
     User,
@@ -20,7 +22,11 @@ from app.models import (
     AuditLog,
     VerificationLog,
     Emergency,  # For legacy compatibility
+    make_point_wkt,
+    validate_coordinates,
 )
+
+logger = logging.getLogger("careon.crud")
 from app.schemas import IncidentCreate, EmergencyCreate
 from app.auth import hash_password, verify_password
 from app.algorithms.classification import classify_incident
@@ -189,6 +195,8 @@ def seed_demo_data(db: Session):
                 contact_phone="+91 821 244 0008",
             ),
         ]
+        for r in resources:
+            r.geom = make_point_wkt(r.latitude, r.longitude)
         db.add_all(resources)
         db.commit()
 
@@ -248,6 +256,8 @@ def seed_demo_data(db: Session):
                 is_active=True,
             ),
         ]
+        for p in providers:
+            p.geom = make_point_wkt(p.latitude, p.longitude)
         db.add_all(providers)
         db.commit()
 
@@ -364,6 +374,9 @@ def seed_demo_data(db: Session):
                 verification_otp="3344",
             ),
         ]
+        for inc in incidents:
+            if inc.latitude and inc.longitude:
+                inc.geom = make_point_wkt(inc.latitude, inc.longitude)
         db.add_all(incidents)
         db.commit()
 
@@ -519,7 +532,40 @@ def check_for_duplicates(
     lon: float,
     description: str,
 ) -> Optional[Incident]:
-    """Check for active incidents within 1.0 km submitted recently."""
+    """Check for active incidents within 800m submitted recently.
+
+    Uses PostGIS ST_DWithin on PostgreSQL for index-backed spatial query.
+    Falls back to Haversine loop on SQLite (unit tests).
+    """
+    from app.database import is_postgres
+
+    if is_postgres():
+        from sqlalchemy import cast, func as sa_func
+        from geoalchemy2 import Geography
+        from geoalchemy2.types import Geometry
+
+        point_wkt = make_point_wkt(lat, lon)
+        try:
+            match = (
+                db.query(Incident)
+                .filter(
+                    Incident.status.notin_(["Resolved", "Cancelled", "Rejected"]),
+                    Incident.category.ilike(category),
+                    Incident.geom.isnot(None),
+                    sa_func.ST_DWithin(
+                        cast(Incident.geom, Geography),
+                        cast(sa_func.ST_GeomFromText(point_wkt, 4326), Geography),
+                        800,  # 800 meters
+                    ),
+                )
+                .first()
+            )
+            return match
+        except Exception as exc:
+            logger.warning(f"PostGIS duplicate check failed, falling back to Haversine: {exc}")
+            # Fall through to Haversine
+
+    # SQLite / fallback: full table scan with Haversine distance
     active_incidents = (
         db.query(Incident)
         .filter(Incident.status.notin_(["Resolved", "Cancelled", "Rejected"]))
@@ -562,6 +608,9 @@ def create_incident(
     title = f"{payload.category} Emergency - {payload.location_name}"
     tracking_token = secrets.token_urlsafe(32)
 
+    inc_lat = payload.latitude or 12.3052
+    inc_lon = payload.longitude or 76.6552
+
     incident = Incident(
         incident_code=incident_code,
         tracking_token=tracking_token,
@@ -570,8 +619,8 @@ def create_incident(
         title=title,
         description=payload.description,
         location_name=payload.location_name,
-        latitude=payload.latitude or 12.3052,
-        longitude=payload.longitude or 76.6552,
+        latitude=inc_lat,
+        longitude=inc_lon,
         affected_people=payload.affected_people or 1,
         help_required=payload.help_required,
         contact_name=payload.contact_name,
@@ -586,6 +635,7 @@ def create_incident(
         duplicate_of_id=duplicate_of_id,
         is_disaster=payload.is_disaster or False,
         disaster_details=payload.disaster_details,
+        geom=make_point_wkt(inc_lat, inc_lon),
     )
     db.add(incident)
     db.commit()

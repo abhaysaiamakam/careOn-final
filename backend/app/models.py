@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Tuple, Optional
 from sqlalchemy import (
     Column,
     Integer,
@@ -10,13 +11,88 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     text,
+    types as sqla_types,
 )
 from sqlalchemy.orm import relationship
+from geoalchemy2 import Geometry
+from geoalchemy2.elements import WKTElement
+import geoalchemy2.admin.dialects.sqlite as s_admin
+
 from app.database import Base
+
+# Protect GeoAlchemy2 SQLite after_create from missing SpatiaLite functions during SQLite testing
+_orig_sqlite_after_create = s_admin.after_create
+
+
+def _safe_sqlite_after_create(table, bind, **kw):
+    try:
+        _orig_sqlite_after_create(table, bind, **kw)
+    except Exception:
+        pass
+
+
+s_admin.after_create = _safe_sqlite_after_create
+
+
+class SpatialPoint(sqla_types.TypeDecorator):
+    """
+    Cross-dialect spatial Point geometry type (SRID 4326).
+    Uses PostGIS Geometry(POINT, 4326) on PostgreSQL.
+    Falls back gracefully to Text on SQLite for isolated unit tests without SpatiaLite.
+    """
+    impl = Geometry("POINT", srid=4326, spatial_index=False)
+    cache_ok = True
+    spatial_index = False
+
+    def load_dialect_impl(self, dialect):
+        if dialect and dialect.name == "sqlite":
+            return dialect.type_descriptor(sqla_types.Text())
+        if dialect:
+            return dialect.type_descriptor(Geometry("POINT", srid=4326, spatial_index=False))
+        return Geometry("POINT", srid=4326, spatial_index=False)
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect and dialect.name == "sqlite":
+            return str(value)
+        if isinstance(value, str):
+            return WKTElement(value, srid=4326)
+        return value
+
+    def process_result_value(self, value, dialect):
+        return value
 
 
 def utc_now():
     return datetime.now(timezone.utc)
+
+
+def validate_coordinates(latitude: float, longitude: float) -> Tuple[float, float]:
+    """
+    Validate geographic coordinates.
+    Latitude must be between -90 and +90 degrees.
+    Longitude must be between -180 and +180 degrees.
+    """
+    if latitude is None or longitude is None:
+        raise ValueError("Latitude and longitude coordinates cannot be null.")
+    try:
+        lat = float(latitude)
+        lon = float(longitude)
+    except (TypeError, ValueError):
+        raise ValueError("Coordinates must be valid floating point numbers.")
+
+    if not (-90.0 <= lat <= 90.0):
+        raise ValueError(f"Invalid latitude: {lat}. Latitude must be between -90.0 and 90.0 degrees.")
+    if not (-180.0 <= lon <= 180.0):
+        raise ValueError(f"Invalid longitude: {lon}. Longitude must be between -180.0 and 180.0 degrees.")
+    return lat, lon
+
+
+def make_point_wkt(latitude: float, longitude: float) -> str:
+    """Return SRID 4326 Point WKT string: POINT(longitude latitude)."""
+    lat, lon = validate_coordinates(latitude, longitude)
+    return f"SRID=4326;POINT({lon} {lat})"
 
 
 class User(Base):
@@ -39,6 +115,9 @@ class User(Base):
 
 class Incident(Base):
     __tablename__ = "incidents"
+    __table_args__ = (
+        Index("idx_incidents_geom", "geom", postgresql_using="gist"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     incident_code = Column(String(40), unique=True, index=True, nullable=False)
@@ -50,6 +129,7 @@ class Incident(Base):
     location_name = Column(String(255), nullable=False)
     latitude = Column(Float, nullable=False, default=12.3052)
     longitude = Column(Float, nullable=False, default=76.6552)
+    geom = Column(SpatialPoint, nullable=True)
     affected_people = Column(Integer, nullable=False, default=1)
     help_required = Column(String(150), nullable=False)
     contact_name = Column(String(100), nullable=False)
@@ -103,6 +183,9 @@ class IncidentUpdate(Base):
 
 class Resource(Base):
     __tablename__ = "resources"
+    __table_args__ = (
+        Index("idx_resources_geom", "geom", postgresql_using="gist"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     resource_code = Column(String(30), unique=True, index=True, nullable=False)
@@ -112,6 +195,7 @@ class Resource(Base):
     location_name = Column(String(200), nullable=False)
     latitude = Column(Float, nullable=False, default=12.3052)
     longitude = Column(Float, nullable=False, default=76.6552)
+    geom = Column(SpatialPoint, nullable=True)
     status = Column(String(30), nullable=False, default="Available")  # Available, Assigned, Busy, Unavailable, Under Maintenance
     capacity = Column(Integer, nullable=False, default=1)
     contact_phone = Column(String(30), nullable=False)
@@ -148,6 +232,9 @@ class Assignment(Base):
 
 class ExternalProvider(Base):
     __tablename__ = "external_providers"
+    __table_args__ = (
+        Index("idx_external_providers_geom", "geom", postgresql_using="gist"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(150), nullable=False)
@@ -156,6 +243,7 @@ class ExternalProvider(Base):
     location_name = Column(String(200), nullable=False)
     latitude = Column(Float, nullable=False, default=12.3052)
     longitude = Column(Float, nullable=False, default=76.6552)
+    geom = Column(SpatialPoint, nullable=True)
     contact_person = Column(String(100), nullable=False)
     phone = Column(String(30), nullable=False)
     service_capabilities = Column(String(255), nullable=False)
@@ -171,12 +259,10 @@ class ProviderEnquiry(Base):
     id = Column(Integer, primary_key=True, index=True)
     incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False)
     provider_id = Column(Integer, ForeignKey("external_providers.id"), nullable=False)
-    # Not Contacted, Contacted, Awaiting Response, Available, Unavailable, Declined, Confirmed
     status = Column(String(40), nullable=False, default="Contacted")
     charge_quote = Column(Float, default=0.0)
     careon_fee = Column(Float, default=0.0)  # Always 0.0
     subsidy_amount = Column(Float, default=0.0)
-    # Pending, Accepted, Declined, Not Required, Not Obtained
     user_consent = Column(String(30), default="Not Required")
     response_time_minutes = Column(Integer, default=15)
     notes = Column(Text, nullable=True)

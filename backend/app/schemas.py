@@ -46,8 +46,8 @@ class IncidentCreate(BaseModel):
     category: str = Field(..., description="Medical, Road accident, Fire, Rescue, Safety / Other, Disaster / Multiple affected people")
     description: str = Field(..., min_length=5)
     location_name: str = Field(..., min_length=2)
-    latitude: Optional[float] = 12.3052
-    longitude: Optional[float] = 76.6552
+    latitude: Optional[float] = Field(default=12.3052, ge=-90.0, le=90.0)
+    longitude: Optional[float] = Field(default=76.6552, ge=-180.0, le=180.0)
     affected_people: Optional[int] = 1
     help_required: str = Field(..., min_length=2)
     contact_name: str = Field(..., min_length=2)
@@ -212,8 +212,8 @@ class ResourceCreate(BaseModel):
     category: str
     capabilities: str
     location_name: str
-    latitude: float = 12.3052
-    longitude: float = 76.6552
+    latitude: float = Field(default=12.3052, ge=-90.0, le=90.0)
+    longitude: float = Field(default=76.6552, ge=-180.0, le=180.0)
     status: Optional[str] = "Available"
     capacity: Optional[int] = 1
     contact_phone: str
@@ -270,8 +270,8 @@ class ProviderCreate(BaseModel):
     provider_type: str
     is_registered_partner: bool = True
     location_name: str
-    latitude: float = 12.3052
-    longitude: float = 76.6552
+    latitude: float = Field(default=12.3052, ge=-90.0, le=90.0)
+    longitude: float = Field(default=76.6552, ge=-180.0, le=180.0)
     contact_person: str
     phone: str
     service_capabilities: str

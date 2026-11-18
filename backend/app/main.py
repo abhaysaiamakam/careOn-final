@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app import __version__
-from app.database import engine, Base, get_db
+from app.database import engine, Base, get_db, is_postgres, check_db_connection
 from app.models import User, Incident, Resource, Assignment, ExternalProvider, ProviderEnquiry, Notification, Feedback
 from app.auth import (
     get_current_user,
@@ -66,17 +66,46 @@ from app.algorithms.allocation import evaluate_allocation_for_incident, compute_
 from app.algorithms.shortage import get_current_shortages
 from app.algorithms.prediction import predict_resource_shortage_risk
 from app.chatbot.sahara import process_sahara_message
+from app.rate_limiter import rate_limit
+from app.models import make_point_wkt
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import logging as _logging
+    _startup_log = _logging.getLogger("careon.startup")
     # Validate secret key configuration at server startup
     validate_and_get_secret_key()
-    # Ensure tables exist and seed demo data on startup
-    Base.metadata.create_all(bind=engine)
+    # Check database connectivity; warn but do not crash if DB is temporarily unavailable.
+    if not check_db_connection():
+        _startup_log.warning(
+            "Database unreachable at startup — application may be degraded. "
+            "Ensure PostgreSQL is running and DATABASE_URL is correctly configured."
+        )
+    # Schema initialisation strategy:
+    #   SQLite  → always use create_all (dev / unit tests)
+    #   PostgreSQL (production) → rely on Alembic migrations; create_all only when
+    #     tables are absent (e.g. fresh integration-test DB or first-run without
+    #     Alembic having been executed yet).
+    if is_postgres():
+        from sqlalchemy import inspect as sa_inspect
+        try:
+            insp = sa_inspect(engine)
+            if "users" not in insp.get_table_names():
+                _startup_log.info("PostgreSQL: no tables found — running create_all for initial setup.")
+                Base.metadata.create_all(bind=engine)
+            else:
+                _startup_log.info("PostgreSQL: tables already exist — skipping create_all (use Alembic for migrations).")
+        except Exception as exc:
+            _startup_log.warning(f"PostgreSQL table inspection failed: {exc} — attempting create_all.")
+            Base.metadata.create_all(bind=engine)
+    else:
+        Base.metadata.create_all(bind=engine)
     db = next(get_db())
     try:
         crud.seed_demo_data(db)
+    except Exception as exc:
+        _startup_log.warning(f"Demo data seeding skipped or partial: {exc}")
     finally:
         db.close()
     yield
@@ -146,7 +175,7 @@ def health_check(db: Session = Depends(get_db)):
 # Auth Routes
 # ==============================================================================
 @app.post("/api/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED, tags=["Auth"])
-def register(payload: UserRegister, db: Session = Depends(get_db)):
+def register(payload: UserRegister, db: Session = Depends(get_db), _rl: None = Depends(rate_limit("auth"))):
     if payload.confirm_password and payload.password != payload.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -172,7 +201,7 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
 
 
 @app.post("/api/auth/login", response_model=TokenResponse, tags=["Auth"])
-def login(payload: UserLogin, db: Session = Depends(get_db)):
+def login(payload: UserLogin, db: Session = Depends(get_db), _rl: None = Depends(rate_limit("auth"))):
     user = crud.authenticate_user(db, payload.email, payload.password)
     if not user:
         raise HTTPException(
@@ -196,6 +225,7 @@ def report_incident(
     payload: IncidentCreate,
     current_user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db),
+    _rl: None = Depends(rate_limit("emergency")),
 ):
     """Public / user emergency reporting endpoint."""
     user_id = current_user.id if current_user else None
@@ -237,6 +267,7 @@ def list_incidents(
 def track_incident_public(
     tracking_token: str,
     db: Session = Depends(get_db),
+    _rl: None = Depends(rate_limit("tracking")),
 ):
     """
     Public restricted tracking endpoint for citizens using a cryptographically unguessable tracking credential.
@@ -468,6 +499,7 @@ def create_resource(
         status=payload.status or "Available",
         capacity=payload.capacity or 1,
         contact_phone=payload.contact_phone,
+        geom=make_point_wkt(payload.latitude, payload.longitude) if payload.latitude and payload.longitude else None,
     )
     db.add(res)
     db.commit()
@@ -608,6 +640,7 @@ def create_provider(
         service_capabilities=payload.service_capabilities,
         estimated_base_charge=payload.estimated_base_charge,
         is_active=True,
+        geom=make_point_wkt(payload.latitude, payload.longitude) if payload.latitude and payload.longitude else None,
     )
     db.add(provider)
     db.commit()

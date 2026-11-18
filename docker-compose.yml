@@ -1,4 +1,53 @@
+# CareOn — M1 Docker Compose
+# PostgreSQL 17 + PostGIS 3.5, Redis 7, FastAPI backend, React frontend
+# Usage:
+#   cp .env.example .env        # fill in POSTGRES_PASSWORD and CAREON_SECRET_KEY
+#   docker compose up -d
+#   docker compose exec backend alembic upgrade head   # first run only
+#
+# NOTE: Docker Desktop must be running. The database is fully managed by Alembic
+# migrations — do NOT rely on Base.metadata.create_all in production.
+
 services:
+
+  # ── PostgreSQL 17 + PostGIS 3.5 ──────────────────────────────────────────
+  postgres:
+    image: postgis/postgis:17-3.5
+    container_name: careon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: careon
+      POSTGRES_USER: careon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - careon-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U careon -d careon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Redis 7 (rate limiting, session cache) ────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: careon-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - careon-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -9,12 +58,19 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - PORT=8000
-      - DATABASE_URL=sqlite:////data/careon.db
-      - PYTHONUNBUFFERED=1
-    volumes:
-      # Persistent Docker volume for SQLite database storage
-      - careon_data:/data
+      DATABASE_URL: postgresql+psycopg://careon:${POSTGRES_PASSWORD}@postgres/careon
+      REDIS_URL: redis://redis:6379/0
+      CAREON_ENV: ${CAREON_ENV:-production}
+      CAREON_SECRET_KEY: ${CAREON_SECRET_KEY:?Set CAREON_SECRET_KEY in .env}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://careon.org,https://app.careon.org}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - careon-net
     healthcheck:
@@ -22,8 +78,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 20s
 
+  # ── React Frontend ────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -50,5 +107,7 @@ networks:
     driver: bridge
 
 volumes:
-  careon_data:
+  postgres_data:
+    driver: local
+  redis_data:
     driver: local
