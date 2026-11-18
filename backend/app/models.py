@@ -209,12 +209,15 @@ class Resource(Base):
     status = Column(String(30), nullable=False, default="Available")  # Available, Assigned, Busy, Unavailable, Under Maintenance
     capacity = Column(Integer, nullable=False, default=1)
     contact_phone = Column(String(30), nullable=False)
+    equipment = Column(String(255), nullable=True, default="oxygen,first_aid_kit")  # e.g. "ventilator,defibrillator,oxygen,monitor,extrication_tools"
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
     current_assignment_id = Column(Integer, nullable=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     last_updated = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     assignments = relationship("Assignment", back_populates="resource")
     assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    organization = relationship("Organization", foreign_keys=[organization_id])
 
 
 class Assignment(Base):
@@ -527,6 +530,47 @@ class OutboxEvent(Base):
     retry_count = Column(Integer, default=0, nullable=False)
     last_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)
+
+
+# ==============================================================================
+# Milestone 5 — Intelligent Dispatch Decision & Audit Log Model
+# ==============================================================================
+class DispatchDecision(Base):
+    """
+    Immutable audit record for every intelligent dispatch decision.
+    Captures:
+    - Incident evaluated
+    - Evaluated candidates and scoring breakdown (explainability)
+    - Original algorithm recommendation
+    - Dispatcher decision: approval or override
+    - Mandatory override reason when overriding
+    - ETA and its provenance (road-network vs fallback)
+    """
+    __tablename__ = "dispatch_decisions"
+    __table_args__ = (
+        Index("ix_dispatch_decisions_incident", "incident_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(String(36), unique=True, index=True, nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    recommendation_version = Column(Integer, default=1, nullable=False)
+    candidates_json = Column(Text, nullable=False)
+    recommended_resource_id = Column(Integer, ForeignKey("resources.id", ondelete="SET NULL"), nullable=True)
+    selected_resource_id = Column(Integer, ForeignKey("resources.id", ondelete="SET NULL"), nullable=False)
+    dispatcher_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    dispatcher_name = Column(String(100), nullable=False)
+    decision_type = Column(String(30), nullable=False)  # approved, overridden
+    override_reason = Column(Text, nullable=True)
+    scoring_weights_version = Column(String(20), default="v1.0", nullable=False)
+    eta_minutes = Column(Float, nullable=True)
+    eta_source = Column(String(50), nullable=True)  # osrm_road_network, haversine_fallback, cache_osrm
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+
+    incident = relationship("Incident", foreign_keys=[incident_id])
+    recommended_resource = relationship("Resource", foreign_keys=[recommended_resource_id])
+    selected_resource = relationship("Resource", foreign_keys=[selected_resource_id])
+    dispatcher = relationship("User", foreign_keys=[dispatcher_id])
 
 
 

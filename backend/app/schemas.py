@@ -643,3 +643,147 @@ class SystemHealthResponse(BaseModel):
     timestamp: datetime
 
 
+# ==============================================================================
+# Milestone 5 — Intelligent Dispatch & Resource Optimization Schemas
+# ==============================================================================
+class DispatchAssessmentResponse(BaseModel):
+    incident_id: int
+    incident_code: str
+    reported_priority: str
+    recommended_priority: str
+    severity: str
+    required_capabilities: List[str]
+    required_equipment: List[str]
+    confidence_score: float
+    missing_information: List[str]
+    is_geospatially_valid: bool
+    is_duplicate_candidate: bool
+    duplicate_of_code: Optional[str] = None
+    has_active_assignment: bool
+    explanation: str
+    assessed_at: str
+
+
+class CandidateScoreResponse(BaseModel):
+    resource_id: int
+    resource_code: str
+    resource_name: str
+    category: str
+    eligibility_status: str
+    overall_score: float
+    eta_minutes: float
+    eta_source: str
+    distance_km: float
+    is_fallback_routing: bool
+    capability_match: Dict[str, Any]
+    equipment_match: Dict[str, Any]
+    location_freshness_seconds: float
+    conflicts_or_warnings: List[str]
+    ineligibility_reasons: List[str]
+    explanation: str
+
+
+class DispatchRecommendationResponse(BaseModel):
+    incident_id: int
+    incident_code: str
+    assessment: DispatchAssessmentResponse
+    top_recommendation: Optional[CandidateScoreResponse] = None
+    ranked_candidates: List[CandidateScoreResponse]
+    total_candidates_evaluated: int
+    eligible_count: int
+
+
+class DispatchOptimizationPlanItemResponse(BaseModel):
+    incident_id: int
+    incident_code: str
+    priority: str
+    severity: str
+    status: str
+    recommended_resource_id: Optional[int] = None
+    recommended_resource_name: Optional[str] = None
+    recommended_resource_code: Optional[str] = None
+    score: float
+    eta_minutes: Optional[float] = None
+    eta_source: Optional[str] = None
+    distance_km: Optional[float] = None
+    rationale: str
+    bottleneck_reason: Optional[str] = None
+    competing_incidents: List[str] = []
+
+
+class DispatchOptimizationResponse(BaseModel):
+    plan_id: str
+    generated_at: str
+    algorithm_version: str
+    total_incidents_evaluated: int
+    assigned_count: int
+    unassigned_count: int
+    allocations: List[DispatchOptimizationPlanItemResponse]
+    fleet_utilization_percent: float
+    systemic_rationale: str
+
+
+class DispatchApproveRequest(BaseModel):
+    incident_id: int
+    resource_id: int
+    notes: Optional[str] = None
+
+
+class DispatchOverrideRequest(BaseModel):
+    incident_id: int
+    resource_id: int
+    override_reason: str = Field(..., min_length=5, description="Mandatory reason for overriding algorithm recommendation")
+    notes: Optional[str] = None
+
+
+class DispatchDecisionResponse(BaseModel):
+    id: int
+    decision_id: str
+    incident_id: int
+    recommendation_version: int
+    selected_resource_id: int
+    dispatcher_name: str
+    decision_type: str
+    override_reason: Optional[str] = None
+    eta_minutes: Optional[float] = None
+    eta_source: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HospitalDiversionUpdateRequest(BaseModel):
+    divert_status: bool
+    divert_reason: Optional[str] = None
+
+
+class HospitalDiversionResponse(BaseModel):
+    organization_id: int
+    divert_status: bool
+    divert_reason: Optional[str] = None
+    updated_at: str
+
+
+class HospitalRecommendationResponse(BaseModel):
+    organization_id: int
+    hospital_name: str
+    location_name: str
+    distance_km: float
+    eta_minutes: float
+    eta_source: str
+    divert_status: bool
+    divert_reason: Optional[str] = None
+    available_er_beds: int
+    trauma_bays_available: int
+    recommendation_tier: str
+    rationale: str
+
+
+class ResourceCapabilityUpdateRequest(BaseModel):
+    capabilities: Optional[str] = None
+    equipment: Optional[str] = None
+    capacity: Optional[int] = None
+    status: Optional[str] = None
+
+
+
