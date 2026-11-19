@@ -85,6 +85,55 @@ from app.routers.coordination import router as coordination_router
 from app.routers.citizen import router as citizen_router
 
 
+def check_demo_seeding_safety(env_name: str, raw_enable_seeding: Optional[str]) -> bool:
+    """
+    Evaluates demo-seeding safety invariants with explicit boolean parsing.
+    Returns True if demo data should be seeded (only in dev/test with seeding enabled).
+    Returns False if demo data seeding is safely skipped.
+    Raises RuntimeError if truthy demo seeding is requested in a production environment.
+    """
+    import logging as _logging
+    _log = _logging.getLogger("careon.startup")
+    env = (env_name or "").lower().strip()
+    is_prod = env in ("production", "prod")
+
+    # Explicit boolean parsing (no reliance on Python string truthiness)
+    is_seeding_requested = False
+    if raw_enable_seeding is not None:
+        val = raw_enable_seeding.strip().lower()
+        if val in ("true", "1", "yes", "on"):
+            is_seeding_requested = True
+        elif val in ("false", "0", "no", "off", ""):
+            is_seeding_requested = False
+        else:
+            is_seeding_requested = False
+
+    if is_prod:
+        if is_seeding_requested:
+            raise RuntimeError(
+                "CRITICAL SECURITY CONFIGURATION ERROR: Demo data seeding cannot be enabled in a production environment (CAREON_ENV=production). "
+                "Disable or unset ENABLE_DEMO_SEEDING to allow safe production startup."
+            )
+        _log.info("Production environment verified: automated demo data seeding strictly disabled.")
+        return False
+
+    if env in ("development", "dev", "test"):
+        # In dev/test environments, default to True if unset
+        should_seed = True if raw_enable_seeding is None else is_seeding_requested
+        if should_seed:
+            return True
+        else:
+            _log.info("Demo data seeding disabled via ENABLE_DEMO_SEEDING=false.")
+            return False
+
+    # Missing or unrecognized environment: fail-safe mode (never seed)
+    _log.warning(
+        f"Unrecognized or missing CAREON_ENV ('{env}'). "
+        "Defaulting to fail-safe mode: automated demo seeding strictly disabled."
+    )
+    return False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import logging as _logging
@@ -116,34 +165,17 @@ async def lifespan(app: FastAPI):
             Base.metadata.create_all(bind=engine)
     else:
         Base.metadata.create_all(bind=engine)
-    env_name = (os.getenv("CAREON_ENV") or os.getenv("ENVIRONMENT") or "").lower().strip()
-    is_prod = env_name in ("production", "prod")
-    enable_seeding = os.getenv("ENABLE_DEMO_SEEDING", "false" if is_prod else "true").lower().strip() in ("true", "1")
 
-    if is_prod:
-        if enable_seeding or os.getenv("ENABLE_DEMO_SEEDING"):
-            raise RuntimeError(
-                "CRITICAL SECURITY CONFIGURATION ERROR: Demo data seeding cannot be enabled in a production environment (CAREON_ENV=production). "
-                "Unset ENABLE_DEMO_SEEDING to allow safe production startup."
-            )
-        _startup_log.info("Production environment verified: automated demo data seeding strictly disabled.")
-    elif env_name in ("development", "dev", "test"):
-        if enable_seeding:
-            db = next(get_db())
-            try:
-                crud.seed_demo_data(db)
-            except Exception as exc:
-                _startup_log.warning(f"Demo data seeding skipped or partial: {exc}")
-            finally:
-                db.close()
-        else:
-            _startup_log.info("Demo data seeding disabled via ENABLE_DEMO_SEEDING=false.")
-    else:
-        # Missing or invalid CAREON_ENV: fail safely without seeding
-        _startup_log.warning(
-            f"Unrecognized or missing CAREON_ENV ('{env_name}'). "
-            "Defaulting to fail-safe mode: automated demo seeding strictly disabled."
-        )
+    env_name = os.getenv("CAREON_ENV") or os.getenv("ENVIRONMENT") or ""
+    raw_enable_seeding = os.getenv("ENABLE_DEMO_SEEDING")
+    if check_demo_seeding_safety(env_name, raw_enable_seeding):
+        db = next(get_db())
+        try:
+            crud.seed_demo_data(db)
+        except Exception as exc:
+            _startup_log.warning(f"Demo data seeding skipped or partial: {exc}")
+        finally:
+            db.close()
 
     # Milestone 4: Start background Redis Pub/Sub subscriber
     try:
