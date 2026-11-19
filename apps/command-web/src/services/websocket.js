@@ -1,7 +1,8 @@
 /**
  * CareOn Command — M4 Real-Time WebSocket Service.
- * Manages authenticated duplex streaming with auto-reconnection,
- * heartbeat management, channel subscriptions, and event routing.
+ * Manages authenticated duplex streaming with initial auth frames (no URL tokens),
+ * heartbeat ping-pong, O(1) deduplication, automatic replay recovery,
+ * channel subscriptions, and event routing.
  */
 
 class CommandWebSocketService {
@@ -12,10 +13,13 @@ class CommandWebSocketService {
     this.subscribers = new Map(); // eventType -> Set of callbacks
     this.statusListeners = new Set();
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
+    this.maxReconnectAttempts = 15;
     this.reconnectTimer = null;
     this.pingTimer = null;
     this.explicitDisconnect = false;
+    this.lastEventId = null;
+    this.seenEventIds = new Set(); // O(1) deduplication ring buffer
+    this.maxSeenCache = 500;
   }
 
   onStatusChange(callback) {
@@ -49,6 +53,7 @@ class CommandWebSocketService {
   }
 
   _emit(eventType, payload) {
+    // Exact match
     const listeners = this.subscribers.get(eventType);
     if (listeners) {
       listeners.forEach((cb) => {
@@ -60,7 +65,20 @@ class CommandWebSocketService {
       });
     }
 
-    // Also notify wildcard listeners
+    // Normalized aliases (e.g. incident.created <-> incident_created)
+    const normalized = eventType.includes('.') ? eventType.replace(/\./g, '_') : eventType.replace(/_/g, '.');
+    const aliasListeners = this.subscribers.get(normalized);
+    if (aliasListeners) {
+      aliasListeners.forEach((cb) => {
+        try {
+          cb(payload);
+        } catch (e) {
+          console.error(`Error in WS alias subscriber for ${normalized}:`, e);
+        }
+      });
+    }
+
+    // Wildcard listeners
     const wildcard = this.subscribers.get('*');
     if (wildcard) {
       wildcard.forEach((cb) => {
@@ -84,51 +102,83 @@ class CommandWebSocketService {
 
     this._notifyStatus('CONNECTING');
 
-    // Build WebSocket URL
-    const isSecure = window.location.protocol === 'https:';
+    // Build WebSocket URL WITHOUT token in query parameters
+    const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
     const wsProto = isSecure ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    // In dev, if on 3003, proxy points to backend, or direct to port 8000
-    const wsUrl = `${wsProto}//${host}/ws?token=${encodeURIComponent(token)}`;
+    const host = typeof window !== 'undefined' ? window.location.host : 'localhost:3003';
+    // Connect to /api/ws (or /ws) without leaking token in URL
+    const wsUrl = `${wsProto}//${host}/api/ws`;
 
     try {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
         this.reconnectAttempts = 0;
-        this._notifyStatus('CONNECTED');
         this._startHeartbeat();
 
-        // Send initial auth frame as well for maximum protocol compatibility
+        // 1. Send Authenticated Initial Frame (Never leak token in URL or logs)
         this.send({
           action: 'auth',
           token: this.token,
-        });
-
-        // Request global channel subscription
-        this.send({
-          action: 'subscribe',
-          channel: 'channel:global',
         });
       };
 
       this.ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          const eventType = message.event || message.type || 'message';
+          const eventType = message.event_type || message.event || message.type || 'message';
+
+          // Handle Authentication Handshake Responses
+          if (eventType === 'auth_required') {
+            this.send({
+              action: 'auth',
+              token: this.token,
+            });
+            return;
+          }
+
+          if (eventType === 'authenticated' || eventType === 'connected') {
+            this._notifyStatus('CONNECTED');
+
+            // 2. Subscribe to Global Operations Channel
+            this.send({
+              action: 'subscribe',
+              channels: ['channel:global'],
+            });
+
+            // 3. Event Replay Recovery if reconnecting after an outage
+            if (this.lastEventId) {
+              this.send({
+                action: 'replay',
+                since_event_id: this.lastEventId,
+                limit: 50,
+              });
+            }
+            return;
+          }
 
           if (eventType === 'pong') {
             return;
           }
 
-          this._emit(eventType, message.data || message);
+          // Handle replay batch
+          if (eventType === 'replay_batch') {
+            const events = message.events || [];
+            events.forEach((evt) => {
+              this._processEvent(evt);
+            });
+            return;
+          }
+
+          // Process real-time event with deduplication
+          this._processEvent(message);
         } catch (err) {
           console.warn('Failed to parse incoming WebSocket message:', err);
         }
       };
 
       this.ws.onerror = (err) => {
-        console.warn('Command WebSocket encountered an error:', err);
+        console.warn('Command WebSocket connection error:', err);
         this._notifyStatus('ERROR');
       };
 
@@ -145,6 +195,26 @@ class CommandWebSocketService {
       this._notifyStatus('ERROR');
       this._scheduleReconnect();
     }
+  }
+
+  _processEvent(message) {
+    const eventId = message.event_id;
+    if (eventId) {
+      if (this.seenEventIds.has(eventId)) {
+        return; // Deduplicate duplicate delivery from multi-instance Redis Pub/Sub
+      }
+      this.seenEventIds.add(eventId);
+      if (this.seenEventIds.size > this.maxSeenCache) {
+        // Trim oldest
+        const first = this.seenEventIds.values().next().value;
+        this.seenEventIds.delete(first);
+      }
+      this.lastEventId = eventId;
+    }
+
+    const eventType = message.event_type || message.event || message.type || 'message';
+    const payload = message.payload || message.data || message;
+    this._emit(eventType, payload);
   }
 
   _scheduleReconnect() {
@@ -180,12 +250,10 @@ class CommandWebSocketService {
     }
   }
 
-  send(data) {
+  send(payload) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(data));
-      return true;
+      this.ws.send(JSON.stringify(payload));
     }
-    return false;
   }
 
   disconnect() {
@@ -193,9 +261,7 @@ class CommandWebSocketService {
     this._stopHeartbeat();
     clearTimeout(this.reconnectTimer);
     if (this.ws) {
-      try {
-        this.ws.close();
-      } catch (e) {}
+      this.ws.close();
       this.ws = null;
     }
     this._notifyStatus('DISCONNECTED');

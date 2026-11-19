@@ -177,46 +177,48 @@ export function CommandLogin({ onSuccess }) {
             </div>
           </form>
 
-          {/* Preset Dispatcher Identity Quick Access */}
-          <div style={{ marginTop: '24px', borderTop: `1px solid ${colors.border}`, paddingTop: '16px' }}>
-            <div style={{ fontSize: '11px', color: colors.textSecondary, marginBottom: '8px', textTransform: 'uppercase', fontWeight: typography.fontWeight.semibold }}>
-              Authorized Dispatch Identities:
+          {/* Preset Dispatcher Identity Quick Access (Development Environment Only) */}
+          {import.meta.env.DEV && (
+            <div style={{ marginTop: '24px', borderTop: `1px solid ${colors.border}`, paddingTop: '16px' }}>
+              <div style={{ fontSize: '11px', color: colors.textSecondary, marginBottom: '8px', textTransform: 'uppercase', fontWeight: typography.fontWeight.semibold }}>
+                Development Quick Access:
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => handleQuickFill('dispatcher@careon.org')}
+                  style={{
+                    background: '#F1F5F9',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '6px',
+                    padding: '6px 10px',
+                    fontSize: '11px',
+                    color: '#1E293B',
+                    cursor: 'pointer',
+                    fontWeight: typography.fontWeight.medium,
+                  }}
+                >
+                  Lead Dispatcher (Mysuru)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickFill('admin@careon.org')}
+                  style={{
+                    background: '#F1F5F9',
+                    border: '1px solid #CBD5E1',
+                    borderRadius: '6px',
+                    padding: '6px 10px',
+                    fontSize: '11px',
+                    color: '#1E293B',
+                    cursor: 'pointer',
+                    fontWeight: typography.fontWeight.medium,
+                  }}
+                >
+                  Operations Administrator
+                </button>
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => handleQuickFill('dispatcher@careon.org')}
-                style={{
-                  background: '#F1F5F9',
-                  border: '1px solid #CBD5E1',
-                  borderRadius: '6px',
-                  padding: '6px 10px',
-                  fontSize: '11px',
-                  color: '#1E293B',
-                  cursor: 'pointer',
-                  fontWeight: typography.fontWeight.medium,
-                }}
-              >
-                Lead Dispatcher (Mysuru)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickFill('admin@careon.org')}
-                style={{
-                  background: '#F1F5F9',
-                  border: '1px solid #CBD5E1',
-                  borderRadius: '6px',
-                  padding: '6px 10px',
-                  fontSize: '11px',
-                  color: '#1E293B',
-                  cursor: 'pointer',
-                  fontWeight: typography.fontWeight.medium,
-                }}
-              >
-                Operations Administrator
-              </button>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Footer Notice */}

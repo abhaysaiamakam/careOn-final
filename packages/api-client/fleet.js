@@ -18,9 +18,9 @@ export async function getResource(resourceId) {
 }
 
 export async function updateResourceStatus(resourceId, statusVal, notes = '') {
-  return request(`/api/resources/${resourceId}/status`, {
-    method: 'PUT',
-    body: { status: statusVal, notes },
+  return request(`/api/resources/${resourceId}`, {
+    method: 'PATCH',
+    body: { status: statusVal },
   });
 }
 

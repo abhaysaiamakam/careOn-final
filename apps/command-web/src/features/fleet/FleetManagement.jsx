@@ -211,6 +211,15 @@ export function FleetManagement({
                   <div style={{ fontSize: '10px', color: colors.textSecondary, fontFamily: 'monospace' }}>
                     {r.latitude?.toFixed(4)}, {r.longitude?.toFixed(4)}
                   </div>
+                  {r.last_updated && (
+                    <div style={{ fontSize: '10px', marginTop: '2px' }}>
+                      {Date.now() - new Date(r.last_updated).getTime() > 30 * 60 * 1000 ? (
+                        <span style={{ color: '#D97706', fontWeight: 600 }}>⚠️ Stale GPS (&gt;30m)</span>
+                      ) : (
+                        <span style={{ color: '#10B981', fontWeight: 600 }}>● Live Telemetry</span>
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>

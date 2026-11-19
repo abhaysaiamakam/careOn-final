@@ -81,13 +81,13 @@ export async function submitIncidentFeedback(incidentId, rating, comments = '', 
 }
 
 export async function getOperationalAnalytics() {
-  return request('/api/analytics', {
+  return request('/api/admin/analytics', {
     method: 'GET',
   });
 }
 
 export async function getShortagesSummary() {
-  return request('/api/shortages', {
+  return request('/api/allocations/shortages', {
     method: 'GET',
   });
 }

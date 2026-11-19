@@ -28,6 +28,7 @@ VIEWPORTS = [
 
 VIEWS = [
     ('command_overview', 'overview'),
+    ('command_dispatch', 'overview'),
     ('command_map', 'map'),
     ('command_fleet', 'fleet'),
     ('command_hospitals', 'hospitals'),
@@ -126,6 +127,19 @@ async def run():
                 await cdp_call(ws, req_counter, 'Runtime.evaluate', {'expression': switch_script})
                 req_counter += 1
                 await asyncio.sleep(0.8)
+
+                # If this is the command_dispatch view or overview, select the first incident in queue to open right command panel!
+                if view_name == 'command_dispatch' or view_name == 'command_overview':
+                    select_script = """
+                    (() => {
+                        const queueItems = Array.from(document.querySelectorAll('div')).filter(d => d.innerText && d.innerText.includes('CARE-2026') || d.innerText.includes('INC-'));
+                        const clickable = document.querySelector('div[style*="cursor: pointer"]') || queueItems[0];
+                        if (clickable) clickable.click();
+                    })();
+                    """
+                    await cdp_call(ws, req_counter, 'Runtime.evaluate', {'expression': select_script})
+                    req_counter += 1
+                    await asyncio.sleep(0.8)
 
                 shot = await cdp_call(ws, req_counter, 'Page.captureScreenshot', {'format': 'png'})
                 req_counter += 1
