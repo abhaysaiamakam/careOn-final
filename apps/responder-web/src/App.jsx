@@ -355,9 +355,18 @@ function ResponderAppContent() {
 
   const handleSubmitHandover = async (payload) => {
     const encId = await ensureEncounterId();
+    const resolvedFacilityId = Number(
+      payload.hospital_id ||
+      payload.facility_id ||
+      activeMission?.destination_hospital_id ||
+      selectedDestination?.id
+    );
+    if (!resolvedFacilityId) {
+      throw new Error('A valid receiving facility ID is required for clinical handover.');
+    }
     const handoverPayload = {
       encounter_id: encId,
-      facility_id: Number(payload.hospital_id || payload.facility_id || 1),
+      facility_id: resolvedFacilityId,
       receiving_department: 'Emergency Department',
       outstanding_clinical_concerns: payload.recommendation || null,
     };

@@ -7,11 +7,12 @@ Strictly adheres to the NO DUMMY DATA principle.
 """
 
 import sys
+import os
 import json
 import urllib.request
 import urllib.error
 
-BASE_URL = 'http://localhost:8000'
+BASE_URL = os.environ.get('API_URL', 'http://localhost:8001')
 
 def request(path, method='GET', payload=None, token=None):
     url = f"{BASE_URL}{path}"
@@ -33,6 +34,14 @@ def run():
     print("======================================================================")
     print(" CareOn M13 — Hospital & Clinical Web Integration Acceptance")
     print("======================================================================")
+
+    # Phase 0: Health Check & Database Isolation Verification
+    print("\n[Phase 0] Verifying Target Database Isolation (Fail-Closed)...")
+    health = request('/api/health', 'GET')
+    db_name = health.get('database_name')
+    if db_name and db_name != 'careon_test':
+        raise RuntimeError(f"FATAL PRE-FLIGHT ERROR: Backend is connected to '{db_name}', NOT 'careon_test'! Aborting to prevent operational database contamination.")
+    print(f"  ✓ Target verified: {db_name} (Database status: {health.get('database')})")
 
     # Phase 1: Authenticate Hospital Staff
     print("\n[Phase 1] Authenticating Clinical Hospital Staff...")

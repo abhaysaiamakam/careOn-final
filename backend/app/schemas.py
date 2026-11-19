@@ -398,6 +398,7 @@ class StatsResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     database: str
+    database_name: Optional[str] = None
     timestamp: str
     version: str
 
@@ -545,6 +546,10 @@ class MissionResponse(BaseModel):
     resource_code: str
     resource_name: str
     notes: Optional[str] = None
+    destination_hospital_id: Optional[int] = None
+    destination_hospital_name: Optional[str] = None
+    destination_hospital_latitude: Optional[float] = None
+    destination_hospital_longitude: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1081,6 +1086,9 @@ class FacilityReadinessAssessmentResponse(BaseModel):
     matched_capabilities: List[str]
     missing_capabilities: List[str]
     explanations: List[str]
+    is_designated: bool = False
+    requires_override: bool = False
+    routing_warning: Optional[str] = None
 
 
 class MCIDistributionRequest(BaseModel):

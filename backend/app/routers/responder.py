@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.database import get_db
 from app.models import (
@@ -25,9 +25,12 @@ from app.models import (
     Incident,
     IncidentUpdate,
     AuditLog,
+    IncomingPatientRequest,
+    HospitalFacility,
     make_point_wkt,
     utc_now,
 )
+from app.hospital_ops.readiness import get_designated_facility
 from app.rbac.roles import UserRole, Permission
 from app.rbac.dependencies import get_current_user_flexible, require_role
 from app.rbac.permissions import require_permission
@@ -57,9 +60,41 @@ def _get_responder_resource(user: User, db: Session) -> Optional[Resource]:
     return db.query(Resource).filter(Resource.status.in_(["Assigned", "Available", "Busy"])).first()
 
 
-def _build_mission_response(assignment: Assignment) -> MissionResponse:
+def _build_mission_response(assignment: Assignment, db: Optional[Session] = None) -> MissionResponse:
     inc = assignment.incident
     res = assignment.resource
+
+    dest_hospital_id = None
+    dest_hospital_name = None
+    dest_hospital_lat = None
+    dest_hospital_lon = None
+
+    session = db or object_session(assignment)
+    if session:
+        inc_req = (
+            session.query(IncomingPatientRequest)
+            .filter(
+                IncomingPatientRequest.incident_id == assignment.incident_id,
+                IncomingPatientRequest.status.in_(["accepted", "acknowledged", "pending"]),
+            )
+            .order_by(
+                IncomingPatientRequest.created_at.desc(),
+            )
+            .first()
+        )
+        if inc_req and inc_req.facility:
+            dest_hospital_id = inc_req.facility.id
+            dest_hospital_name = inc_req.facility.name
+            dest_hospital_lat = inc_req.facility.latitude
+            dest_hospital_lon = inc_req.facility.longitude
+        else:
+            desig = get_designated_facility(session)
+            if desig:
+                dest_hospital_id = desig.id
+                dest_hospital_name = desig.name
+                dest_hospital_lat = desig.latitude
+                dest_hospital_lon = desig.longitude
+
     return MissionResponse(
         id=assignment.id,
         incident_id=inc.id,
@@ -80,6 +115,10 @@ def _build_mission_response(assignment: Assignment) -> MissionResponse:
         resource_code=res.resource_code,
         resource_name=res.name,
         notes=assignment.notes,
+        destination_hospital_id=dest_hospital_id,
+        destination_hospital_name=dest_hospital_name,
+        destination_hospital_latitude=dest_hospital_lat,
+        destination_hospital_longitude=dest_hospital_lon,
     )
 
 
@@ -98,6 +137,7 @@ def get_responder_profile(
                 Assignment.resource_id == resource.id,
                 Assignment.status.in_(["Active", "Accepted", "En Route", "On Scene", "Transporting"]),
             )
+            .order_by(Assignment.assigned_at.desc(), Assignment.id.desc())
             .first()
         )
 

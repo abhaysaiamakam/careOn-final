@@ -219,9 +219,14 @@ def root():
 @app.get("/api/health", response_model=HealthResponse, tags=["System"])
 def health_check(db: Session = Depends(get_db)):
     """Healthcheck endpoint for Docker Compose, CI, and orchestrators."""
+    db_name = None
     try:
         db.execute(text("SELECT 1"))
         db_status = "connected"
+        try:
+            db_name = db.execute(text("SELECT current_database()")).scalar()
+        except Exception:
+            pass
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -231,6 +236,7 @@ def health_check(db: Session = Depends(get_db)):
     return HealthResponse(
         status="healthy",
         database=db_status,
+        database_name=str(db_name) if db_name else None,
         timestamp=datetime.now(timezone.utc).isoformat(),
         version=__version__,
     )

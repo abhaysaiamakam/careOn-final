@@ -21,6 +21,7 @@ Produces explainable suitability classifications:
 - UNKNOWN_INSUFFICIENT_INFO
 """
 
+import os
 import json
 import logging
 from dataclasses import dataclass, field
@@ -83,6 +84,9 @@ class FacilityReadinessAssessment:
     matched_capabilities: List[str]
     missing_capabilities: List[str]
     explanations: List[str]
+    is_designated: bool = False
+    requires_override: bool = False
+    routing_warning: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -107,7 +111,36 @@ class FacilityReadinessAssessment:
             "matched_capabilities": self.matched_capabilities,
             "missing_capabilities": self.missing_capabilities,
             "explanations": self.explanations,
+            "is_designated": self.is_designated,
+            "requires_override": self.requires_override,
+            "routing_warning": self.routing_warning,
         }
+
+
+def get_designated_facility(db: Session) -> Optional[HospitalFacility]:
+    """
+    Resolves the single configured designated receiving hospital facility.
+    In the initial CareOn deployment, all emergency requests target this facility
+    unless marked diverted, inactive, or manually overridden.
+    Configured via CAREON_DESIGNATED_FACILITY_ID or CAREON_DESIGNATED_FACILITY_CODE (default VRH-TRAUMA-01).
+    """
+    fac_id_str = os.getenv("CAREON_DESIGNATED_FACILITY_ID")
+    if fac_id_str:
+        try:
+            fac = db.query(HospitalFacility).filter(HospitalFacility.id == int(fac_id_str)).first()
+            if fac:
+                return fac
+        except (ValueError, TypeError):
+            pass
+
+    code = os.getenv("CAREON_DESIGNATED_FACILITY_CODE", "VRH-TRAUMA-01")
+    if code:
+        fac = db.query(HospitalFacility).filter(HospitalFacility.facility_code == code).first()
+        if fac:
+            return fac
+
+    # Deterministic fallback to first active facility
+    return db.query(HospitalFacility).filter(HospitalFacility.is_active == True).order_by(HospitalFacility.id.asc()).first()
 
 
 def assess_facility_readiness(
@@ -267,6 +300,28 @@ def assess_facility_readiness(
         classification = ReadinessClassification.POTENTIALLY_SUITABLE_UNCONFIRMED
         explanations.append("Facility is potentially suitable; awaiting hospital staff confirmation.")
 
+    # 8. Check CareOn Designated Facility Configuration & Routing Overrides
+    desig = get_designated_facility(db)
+    is_designated = (desig is not None and desig.id == facility.id)
+    requires_override = False
+    routing_warning: Optional[str] = None
+
+    if is_designated:
+        if not facility.is_active:
+            requires_override = True
+            routing_warning = "Designated facility is INACTIVE. Manual dispatcher override required to route."
+            explanations.append(routing_warning)
+        elif operating_status in (DiversionStatus.FULL_DIVERSION, DiversionStatus.CLOSED) or is_diverted:
+            requires_override = True
+            routing_warning = f"Designated facility is DIVERTED/CLOSED ({diversion_reason or operating_status}). Manual dispatcher override required to route."
+            explanations.append(routing_warning)
+        elif overall_freshness in (CapacityFreshnessStatus.STALE, CapacityFreshnessStatus.UNKNOWN):
+            requires_override = True
+            routing_warning = f"Designated facility capacity data is {overall_freshness.upper()}. Verification required before routing."
+            explanations.append(routing_warning)
+        else:
+            explanations.append("Primary CareOn designated facility for acute emergency intake.")
+
     return FacilityReadinessAssessment(
         facility_id=facility.id,
         facility_code=facility.facility_code,
@@ -289,6 +344,9 @@ def assess_facility_readiness(
         matched_capabilities=matched_capabilities,
         missing_capabilities=missing_capabilities,
         explanations=explanations,
+        is_designated=is_designated,
+        requires_override=requires_override,
+        routing_warning=routing_warning,
     )
 
 
@@ -302,6 +360,7 @@ def rank_hospital_destinations(
     """
     Ranks all active hospital facilities by readiness classification, score, and travel time.
     Separates confirmed/suitable hospitals from diverted or incapable facilities.
+    Prioritizes designated facility when eligible without override flags.
     """
     facilities = db.query(HospitalFacility).filter(HospitalFacility.is_active == True).all()
     assessments: List[FacilityReadinessAssessment] = []
@@ -317,6 +376,7 @@ def rank_hospital_destinations(
         assessments.append(assessment)
 
     # Sort hierarchy:
+    # 0. Designated facility first (if not requiring override)
     # 1. Non-diverted / capable first
     # 2. Confirmed & recent suitable first
     # 3. Descending readiness score
@@ -331,7 +391,8 @@ def rank_hospital_destinations(
             ReadinessClassification.CAPABILITY_UNAVAILABLE: 5,
             ReadinessClassification.DIVERTED: 6,
         }.get(a.classification, 7)
-        return (tier_weight, -a.score, a.eta_minutes)
+        desig_priority = 0 if (a.is_designated and not a.requires_override) else 1
+        return (desig_priority, tier_weight, -a.score, a.eta_minutes)
 
     assessments.sort(key=sort_key)
     return assessments[:max_candidates]

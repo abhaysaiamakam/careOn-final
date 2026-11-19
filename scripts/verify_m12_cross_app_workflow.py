@@ -14,7 +14,7 @@ import json
 import time
 import requests
 
-API_URL = os.environ.get("API_URL", "http://localhost:8000")
+API_URL = os.environ.get("API_URL", "http://localhost:8001")
 
 def log(step, msg):
     print(f"\n[STEP {step}] {msg}")
@@ -32,11 +32,16 @@ def main():
     print(f"Backend Target: {API_URL}")
     print("=================================================================")
 
-    # 1. Health check
-    log(1, "Verify Central Backend Health")
+    # 1. Health check & Fail-Closed Guard
+    log(1, "Verify Central Backend Health & Fail-Closed Isolation")
     r = requests.get(f"{API_URL}/api/health")
     data = assert_status(r, 200, "Backend Health")
-    print(f"  OK: Database={data.get('database')}, Status={data.get('status')}")
+    db_name = data.get("database_name")
+    if db_name and db_name != "careon_test":
+        print(f"FATAL PRE-FLIGHT ERROR: Backend is connected to '{db_name}', NOT 'careon_test'!")
+        print("Test execution aborted immediately to prevent database contamination.")
+        sys.exit(1)
+    print(f"  OK: Database={data.get('database')} ({db_name}), Status={data.get('status')}")
 
     # 2. Authenticate Dispatcher
     log(2, "Authenticate Command Dispatcher Account")

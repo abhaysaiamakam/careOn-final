@@ -75,6 +75,7 @@ export function IncidentCommandPanel({
 
   // Handover State
   const [encounters, setEncounters] = useState([]);
+  const [hospitalRouting, setHospitalRouting] = useState(false);
 
   const notify = (msg, isErr = false) => {
     if (isErr) {
@@ -205,6 +206,28 @@ export function IncidentCommandPanel({
       console.warn('Failed to load hospital recommendations:', err);
     } finally {
       setHospitalLoading(false);
+    }
+  };
+
+  const handleRouteHospital = async (hospital) => {
+    if (!incident) return;
+    setHospitalRouting(true);
+    try {
+      await createIncomingPatientRequest({
+        facility_id: hospital.facility_id,
+        incident_id: incident.id,
+        emergency_severity: incident.priority || 'High',
+        patient_condition_summary: `${incident.title || ''}: ${incident.description || ''}`.trim(),
+        eta_minutes: hospital.eta_minutes || 10,
+        eta_source: hospital.eta_source || 'OSRM Road Network',
+      });
+      notify(`Pre-arrival notification sent to ${hospital.facility_name}. Awaiting hospital confirmation.`);
+      loadHospitals();
+    } catch (err) {
+      console.error('Failed to route hospital:', err);
+      notify(err.message || 'Failed to send pre-arrival notification', true);
+    } finally {
+      setHospitalRouting(false);
     }
   };
 
@@ -596,22 +619,47 @@ export function IncidentCommandPanel({
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {hospitalsRec.map((h, idx) => (
-                  <Card key={idx} padding="md" style={{ border: `1px solid ${colors.border}` }}>
+                  <Card key={idx} padding="md" style={{ border: `1px solid ${h.is_designated ? colors.primary : colors.border}`, backgroundColor: h.is_designated ? '#F8FAFC' : '#FFFFFF' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <span style={{ fontSize: typography.fontSize.xs, fontWeight: 700, color: colors.textPrimary }}>
-                        {h.facility_name}
-                      </span>
-                      <Badge variant={h.divert_status ? 'danger' : 'success'}>
-                        {h.divert_status ? 'ON DIVERT' : 'OPEN'}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: typography.fontSize.xs, fontWeight: 700, color: colors.textPrimary }}>
+                          {h.facility_name}
+                        </span>
+                        {h.is_designated && (
+                          <Badge variant="primary">Designated Intake</Badge>
+                        )}
+                        {h.has_confirmed && (
+                          <Badge variant="success">Confirmed Pre-Arrival</Badge>
+                        )}
+                      </div>
+                      <Badge variant={h.operating_status === 'diverted' || h.divert_status ? 'danger' : 'success'}>
+                        {h.operating_status === 'diverted' || h.divert_status ? 'ON DIVERT' : 'OPEN'}
                       </Badge>
                     </div>
 
                     <div style={{ fontSize: '11px', color: colors.textSecondary, marginBottom: '6px' }}>
-                      Trauma: <strong>{h.trauma_level || 'General'}</strong> • Travel ETA: <strong>{h.eta_minutes || 10} min</strong>
+                      Trauma: <strong>{h.trauma_level || 'Level 1 Trauma'}</strong> • Travel ETA: <strong>{h.eta_minutes || 10} min</strong> ({h.eta_source || 'OSRM'})
                     </div>
 
-                    <div style={{ fontSize: '11px', color: colors.textSecondary }}>
-                      ER Bays: {h.available_er_beds ?? 'N/A'} • ICU: {h.icu_beds_available ?? 'N/A'}
+                    <div style={{ fontSize: '11px', color: colors.textSecondary, marginBottom: '8px' }}>
+                      ER Bays: <strong>{h.er_beds_available ?? h.available_er_beds ?? 'N/A'}</strong> • ICU: <strong>{h.icu_beds_available ?? 'N/A'}</strong> • Incoming: <strong>{h.incoming_patients_count ?? 0}</strong> • Freshness: <em>{h.capacity_freshness || 'Verified'}</em>
+                    </div>
+
+                    {h.routing_warning && (
+                      <div style={{ padding: '6px 8px', borderRadius: '4px', backgroundColor: '#FEF2F2', border: '1px solid #FCA5A5', color: '#991B1B', fontSize: '11px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <AlertTriangle size={12} /> {h.routing_warning}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+                      <Button
+                        size="sm"
+                        variant={h.requires_override ? 'danger' : 'primary'}
+                        disabled={hospitalRouting}
+                        onClick={() => handleRouteHospital(h)}
+                      >
+                        {hospitalRouting ? 'Transmitting...' : (h.requires_override ? 'Manual Override & Route' : 'Route & Send Pre-Arrival Notification')}
+                      </Button>
                     </div>
                   </Card>
                 ))}
