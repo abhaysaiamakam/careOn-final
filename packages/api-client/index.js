@@ -10,3 +10,5 @@ export * from './hospitals.js';
 export * from './coordination.js';
 export * from './handover.js';
 export * from './intelligence.js';
+export * from './responder.js';
+export * from './sync.js';

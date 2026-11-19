@@ -401,7 +401,7 @@ def get_incident_details(
     # Authorization check:
     # Admins and dispatchers can access any incident.
     # Regular users can only access incidents they reported.
-    if current_user.role != "admin":
+    if current_user.role not in ("admin", "super_admin", "dispatcher"):
         if item.user_id is None or item.user_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

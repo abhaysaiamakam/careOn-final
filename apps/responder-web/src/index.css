@@ -1,0 +1,51 @@
+@import '@careon/design-system/theme.css';
+
+:root {
+  --color-primary: #FFFFFF;
+  --color-secondary: #D92D3A;
+  --color-charcoal: #222222;
+  --color-bg-field: #F8FAFC;
+  --color-border: #E2E8F0;
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #64748B;
+  --color-success: #16A34A;
+  --color-warning: #D97706;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--color-bg-field);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  touch-action: manipulation;
+}
+
+button {
+  font-family: inherit;
+  user-select: none;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: 16px; /* Prevents auto-zoom on iOS */
+}
+
+/* Pulsing beacon animation for live missions */
+@keyframes responderPulse {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.mission-pulse {
+  animation: responderPulse 2s infinite ease-in-out;
+}

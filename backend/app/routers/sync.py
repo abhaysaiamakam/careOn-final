@@ -96,6 +96,7 @@ def revoke_device_endpoint(
 # ==============================================================================
 
 @router.post("/upload", response_model=SyncUploadBatchResponse, status_code=status.HTTP_200_OK)
+@router.post("/batch", response_model=SyncUploadBatchResponse, status_code=status.HTTP_200_OK)
 def upload_sync_batch_endpoint(
     payload: SyncUploadBatchRequest,
     current_user: User = Depends(get_current_user),
