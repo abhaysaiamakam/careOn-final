@@ -116,17 +116,34 @@ async def lifespan(app: FastAPI):
             Base.metadata.create_all(bind=engine)
     else:
         Base.metadata.create_all(bind=engine)
-    env_name = os.getenv("CAREON_ENV", os.getenv("ENVIRONMENT", "development")).lower()
-    if env_name not in ("production", "prod"):
-        db = next(get_db())
-        try:
-            crud.seed_demo_data(db)
-        except Exception as exc:
-            _startup_log.warning(f"Demo data seeding skipped or partial: {exc}")
-        finally:
-            db.close()
+    env_name = (os.getenv("CAREON_ENV") or os.getenv("ENVIRONMENT") or "").lower().strip()
+    is_prod = env_name in ("production", "prod")
+    enable_seeding = os.getenv("ENABLE_DEMO_SEEDING", "false" if is_prod else "true").lower().strip() in ("true", "1")
+
+    if is_prod:
+        if enable_seeding or os.getenv("ENABLE_DEMO_SEEDING"):
+            raise RuntimeError(
+                "CRITICAL SECURITY CONFIGURATION ERROR: Demo data seeding cannot be enabled in a production environment (CAREON_ENV=production). "
+                "Unset ENABLE_DEMO_SEEDING to allow safe production startup."
+            )
+        _startup_log.info("Production environment verified: automated demo data seeding strictly disabled.")
+    elif env_name in ("development", "dev", "test"):
+        if enable_seeding:
+            db = next(get_db())
+            try:
+                crud.seed_demo_data(db)
+            except Exception as exc:
+                _startup_log.warning(f"Demo data seeding skipped or partial: {exc}")
+            finally:
+                db.close()
+        else:
+            _startup_log.info("Demo data seeding disabled via ENABLE_DEMO_SEEDING=false.")
     else:
-        _startup_log.info("Production environment detected: automated demo data seeding strictly disabled.")
+        # Missing or invalid CAREON_ENV: fail safely without seeding
+        _startup_log.warning(
+            f"Unrecognized or missing CAREON_ENV ('{env_name}'). "
+            "Defaulting to fail-safe mode: automated demo seeding strictly disabled."
+        )
 
     # Milestone 4: Start background Redis Pub/Sub subscriber
     try:

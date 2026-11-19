@@ -98,7 +98,7 @@ async def handle_websocket_connection(websocket: WebSocket, token: Optional[str]
             try:
                 raw_frame = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
                 data = json.loads(raw_frame)
-                if data.get("action") == "auth" and data.get("token"):
+                if (data.get("action") == "auth" or data.get("type") == "auth") and data.get("token"):
                     session = authenticate_ws_token(data["token"], db)
             except (asyncio.TimeoutError, json.JSONDecodeError):
                 pass

@@ -1,3 +1,4 @@
+import os
 import re
 import secrets
 import logging
@@ -72,6 +73,12 @@ def _safe_record_event(
 # ==============================================================================
 def seed_demo_data(db: Session):
     """Seed comprehensive, realistic demo data for the CareOn platform."""
+    env = (os.getenv("CAREON_ENV") or os.getenv("ENVIRONMENT") or "").lower().strip()
+    if env in ("production", "prod"):
+        raise RuntimeError(
+            "CRITICAL INTEGRITY VIOLATION: crud.seed_demo_data() was invoked in a PRODUCTION environment! "
+            "Execution blocked to prevent operational database contamination."
+        )
     # 1. Admin & Normal Users
     admin_user = db.query(User).filter(User.email == "admin@careon.org").first()
     if not admin_user:

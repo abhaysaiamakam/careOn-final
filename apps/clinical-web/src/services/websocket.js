@@ -101,7 +101,7 @@ class ClinicalWebSocketService {
 
     const envWs = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = envWs || `${protocol}//${window.location.host}/ws`;
+    const wsUrl = envWs || `${protocol}//${window.location.host}/api/ws`;
 
     try {
       this.ws = new WebSocket(wsUrl);
@@ -109,6 +109,7 @@ class ClinicalWebSocketService {
       this.ws.onopen = () => {
         this.reconnectAttempts = 0;
         this.ws.send(JSON.stringify({
+          action: 'auth',
           type: 'auth',
           token: this.token,
           last_event_id: this.lastEventId,

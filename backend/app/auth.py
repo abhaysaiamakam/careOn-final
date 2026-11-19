@@ -13,6 +13,15 @@ from app.models import User
 
 INSECURE_DEFAULT_SECRET = "careon-super-secret-key-2026-demo"
 DEV_FALLBACK_SECRET = "careon-dev-only-secret-key-not-for-production"
+KNOWN_INSECURE_SECRETS = {
+    INSECURE_DEFAULT_SECRET,
+    DEV_FALLBACK_SECRET,
+    "careon_dev_secret_key_long_random_string_2026",
+    "change_me_to_a_long_random_secret_in_production",
+    "secret",
+    "password",
+    "admin123",
+}
 TOKEN_EXPIRY_SECONDS = 86400 * 7  # 7 days
 
 
@@ -30,7 +39,7 @@ def validate_and_get_secret_key(environment: Optional[str] = None, secret_overri
             raise RuntimeError(
                 "CRITICAL SECURITY CONFIGURATION ERROR: CAREON_SECRET_KEY environment variable must be set in production."
             )
-        if secret == INSECURE_DEFAULT_SECRET:
+        if secret in KNOWN_INSECURE_SECRETS:
             raise RuntimeError(
                 "CRITICAL SECURITY CONFIGURATION ERROR: The known default demo secret key is strictly forbidden in production."
             )

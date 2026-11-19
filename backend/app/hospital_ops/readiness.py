@@ -122,25 +122,25 @@ def get_designated_facility(db: Session) -> Optional[HospitalFacility]:
     Resolves the single configured designated receiving hospital facility.
     In the initial CareOn deployment, all emergency requests target this facility
     unless marked diverted, inactive, or manually overridden.
-    Configured via CAREON_DESIGNATED_FACILITY_ID or CAREON_DESIGNATED_FACILITY_CODE (default VRH-TRAUMA-01).
+    Uses CAREON_DESIGNATED_FACILITY_CODE as the authoritative configuration reference.
+    Fails closed (returns None) if the configured facility cannot be resolved in the database.
+    Does NOT assume Facility ID 1 exists or fall back to arbitrary facilities.
     """
-    fac_id_str = os.getenv("CAREON_DESIGNATED_FACILITY_ID")
-    if fac_id_str:
-        try:
-            fac = db.query(HospitalFacility).filter(HospitalFacility.id == int(fac_id_str)).first()
-            if fac:
-                return fac
-        except (ValueError, TypeError):
-            pass
-
     code = os.getenv("CAREON_DESIGNATED_FACILITY_CODE", "VRH-TRAUMA-01")
-    if code:
-        fac = db.query(HospitalFacility).filter(HospitalFacility.facility_code == code).first()
-        if fac:
-            return fac
+    if not code or not code.strip():
+        logger.warning("CAREON_DESIGNATED_FACILITY_CODE is not configured. Failing closed.")
+        return None
 
-    # Deterministic fallback to first active facility
-    return db.query(HospitalFacility).filter(HospitalFacility.is_active == True).order_by(HospitalFacility.id.asc()).first()
+    fac = db.query(HospitalFacility).filter(HospitalFacility.facility_code == code.strip()).first()
+    if not fac:
+        logger.error(f"Designated facility code '{code}' could not be resolved in the database. Failing closed.")
+        return None
+
+    if not fac.organization_id:
+        logger.error(f"Designated facility '{code}' is not associated with an authorized hospital organization. Failing closed.")
+        return None
+
+    return fac
 
 
 def assess_facility_readiness(
