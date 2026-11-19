@@ -4,3 +4,4 @@ export * from './offline.js';
 export * from './tracking.js';
 export * from './command.js';
 export * from './responder.js';
+export * from './clinical.js';

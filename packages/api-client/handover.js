@@ -98,9 +98,12 @@ export async function getHandoverVersions(handoverToken) {
   });
 }
 
-export async function actionHandoverRecord(handoverToken, action, notes = '') {
+export async function actionHandoverRecord(handoverToken, action, notesOrPayload = '') {
+  const payload = typeof notesOrPayload === 'object'
+    ? { action, ...notesOrPayload }
+    : { action, clarification_notes: notesOrPayload, correction_reason: notesOrPayload, notes: notesOrPayload };
   return request(`/api/clinical/handovers/${encodeURIComponent(handoverToken)}/action`, {
     method: 'POST',
-    body: { action, notes },
+    body: payload,
   });
 }
