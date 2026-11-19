@@ -103,11 +103,12 @@ class CommandWebSocketService {
     this._notifyStatus('CONNECTING');
 
     // Build WebSocket URL WITHOUT token in query parameters
+    const envWs = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL;
     const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
     const wsProto = isSecure ? 'wss:' : 'ws:';
     const host = typeof window !== 'undefined' ? window.location.host : 'localhost:3003';
     // Connect to /api/ws (or /ws) without leaking token in URL
-    const wsUrl = `${wsProto}//${host}/api/ws`;
+    const wsUrl = envWs || `${wsProto}//${host}/api/ws`;
 
     try {
       this.ws = new WebSocket(wsUrl);

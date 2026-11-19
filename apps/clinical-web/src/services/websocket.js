@@ -99,8 +99,9 @@ class ClinicalWebSocketService {
 
     this._notifyStatus('CONNECTING');
 
+    const envWs = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const wsUrl = envWs || `${protocol}//${window.location.host}/ws`;
 
     try {
       this.ws = new WebSocket(wsUrl);

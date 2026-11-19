@@ -116,13 +116,17 @@ async def lifespan(app: FastAPI):
             Base.metadata.create_all(bind=engine)
     else:
         Base.metadata.create_all(bind=engine)
-    db = next(get_db())
-    try:
-        crud.seed_demo_data(db)
-    except Exception as exc:
-        _startup_log.warning(f"Demo data seeding skipped or partial: {exc}")
-    finally:
-        db.close()
+    env_name = os.getenv("CAREON_ENV", os.getenv("ENVIRONMENT", "development")).lower()
+    if env_name not in ("production", "prod"):
+        db = next(get_db())
+        try:
+            crud.seed_demo_data(db)
+        except Exception as exc:
+            _startup_log.warning(f"Demo data seeding skipped or partial: {exc}")
+        finally:
+            db.close()
+    else:
+        _startup_log.info("Production environment detected: automated demo data seeding strictly disabled.")
 
     # Milestone 4: Start background Redis Pub/Sub subscriber
     try:

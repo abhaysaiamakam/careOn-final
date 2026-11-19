@@ -99,10 +99,11 @@ class ResponderWebSocketService {
 
     this._notifyStatus('CONNECTING');
 
+    const envWs = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL;
     const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
     const wsProto = isSecure ? 'wss:' : 'ws:';
     const host = typeof window !== 'undefined' ? window.location.host : 'localhost:3004';
-    const wsUrl = `${wsProto}//${host}/api/ws`;
+    const wsUrl = envWs || `${wsProto}//${host}/api/ws`;
 
     try {
       this.ws = new WebSocket(wsUrl);
