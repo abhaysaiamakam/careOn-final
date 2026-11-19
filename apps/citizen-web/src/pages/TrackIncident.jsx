@@ -29,6 +29,7 @@ import {
   cancelIncident,
 } from '@careon/api-client';
 import { useAuth } from '@careon/auth';
+import { CitizenGoogleMap } from '../components/CitizenGoogleMap.jsx';
 
 export function TrackIncident({ initialId, onNavigate }) {
   const { user, isAuthenticated } = useAuth();
@@ -298,6 +299,30 @@ export function TrackIncident({ initialId, onNavigate }) {
                 })}
               </div>
             </div>
+
+            {/* Live Interactive Google Map Tracking View */}
+            {incident.latitude && incident.longitude && (
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ fontSize: typography.fontSize.xs, fontWeight: typography.fontWeight.semibold, color: colors.textSecondary, marginBottom: '8px', textTransform: 'uppercase' }}>
+                  Live GPS Tracking
+                </div>
+                <CitizenGoogleMap
+                  center={{ lat: Number(incident.latitude), lng: Number(incident.longitude) }}
+                  zoom={15}
+                  height="260px"
+                  markers={[
+                    {
+                      id: 'incident-pin',
+                      lat: Number(incident.latitude),
+                      lng: Number(incident.longitude),
+                      type: 'incident',
+                      title: incident.location_name || 'Emergency Incident Site',
+                    },
+                  ]}
+                  helperNotice={`📍 Live Emergency Location • ${incident.incident_code || 'Incident'}`}
+                />
+              </div>
+            )}
 
             {/* Location & Details Summary */}
             <div

@@ -41,6 +41,29 @@ export function acquireCurrentLocation(options = {}) {
 }
 
 export async function reverseGeocode(latitude, longitude) {
+  // 1. Try Google Maps Geocoder if Google Maps API is loaded
+  if (typeof window !== 'undefined' && window.google?.maps?.Geocoder) {
+    try {
+      const geocoder = new window.google.maps.Geocoder();
+      const response = await new Promise((resolve, reject) => {
+        geocoder.geocode(
+          { location: { lat: Number(latitude), lng: Number(longitude) } },
+          (results, status) => {
+            if (status === 'OK' && results && results[0]) {
+              resolve(results[0].formatted_address);
+            } else {
+              reject(new Error(`Google Geocoder status: ${status}`));
+            }
+          }
+        );
+      });
+      if (response) return response;
+    } catch (gErr) {
+      console.warn('Google Maps geocoding fallback to secondary service:', gErr);
+    }
+  }
+
+  // 2. Fallback to OpenStreetMap Nominatim
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,

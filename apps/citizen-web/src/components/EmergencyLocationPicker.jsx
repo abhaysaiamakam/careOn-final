@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { MapPin, Navigation, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button, Input, Card, Badge, typography, colors } from '@careon/design-system';
 import { acquireCurrentLocation, reverseGeocode } from '../services/geolocation.js';
+import { CitizenGoogleMap } from './CitizenGoogleMap.jsx';
 
 export function EmergencyLocationPicker({
   locationName,
@@ -12,6 +13,7 @@ export function EmergencyLocationPicker({
   const [loadingGps, setLoadingGps] = useState(false);
   const [gpsError, setGpsError] = useState(null);
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
+  const [geocodingPin, setGeocodingPin] = useState(false);
 
   const handleAcquireGps = async () => {
     setLoadingGps(true);
@@ -33,6 +35,29 @@ export function EmergencyLocationPicker({
       setLoadingGps(false);
     }
   };
+
+  const handleMapPinChange = async ({ lat, lng }) => {
+    setGeocodingPin(true);
+    try {
+      const addr = await reverseGeocode(lat, lng);
+      onChange({
+        latitude: lat,
+        longitude: lng,
+        locationName: addr || locationName,
+      });
+    } catch (e) {
+      onChange({
+        latitude: lat,
+        longitude: lng,
+        locationName,
+      });
+    } finally {
+      setGeocodingPin(false);
+    }
+  };
+
+  const currentLat = typeof latitude === 'number' && latitude !== 0 ? latitude : 12.3052;
+  const currentLng = typeof longitude === 'number' && longitude !== 0 ? longitude : 76.6552;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -78,9 +103,24 @@ export function EmergencyLocationPicker({
           }}
         >
           <AlertCircle size={14} />
-          <span>{gpsError} Please enter your address or landmark below.</span>
+          <span>{gpsError} Please enter your address or tap the map below.</span>
         </div>
       )}
+
+      {/* Interactive Google Map Location Picker */}
+      <CitizenGoogleMap
+        center={{ lat: currentLat, lng: currentLng }}
+        zoom={latitude && longitude ? 16 : 14}
+        height="220px"
+        selectable={true}
+        selectedPin={{ lat: currentLat, lng: currentLng }}
+        onPinChange={handleMapPinChange}
+        helperNotice={
+          geocodingPin
+            ? 'Updating address from Google Maps pin...'
+            : '📍 Click map or drag pin to position exact emergency location'
+        }
+      />
 
       <Input
         label="Emergency Location / Street Address / Landmark"

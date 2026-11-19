@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { reportIncident } from '../api';
 import { useTranslation } from '../translations';
-import LeafletMap from '../components/LeafletMap';
+import GoogleMap from '../components/GoogleMap';
 import {
   AlertTriangle,
   MapPin,
@@ -298,9 +298,9 @@ export default function ReportEmergency({ lang = 'en', onSubmitted, currentUser 
               placeholder={t('location_placeholder') || 'E.g., Near KR Hospital, Sayyaji Rao Road, Mysuru'}
               required
             />
-            {/* Interactive Leaflet Location Picker */}
+            {/* Interactive Google Maps Location Picker */}
             <div style={{ marginTop: '0.75rem', borderRadius: 10, overflow: 'hidden', border: '1px solid #cbd5e1' }}>
-              <LeafletMap
+              <GoogleMap
                 height="220px"
                 center={[latitude, longitude]}
                 selectable={true}

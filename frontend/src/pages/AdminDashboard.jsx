@@ -19,7 +19,7 @@ import {
   resetSimulationData,
 } from '../api';
 import { useTranslation } from '../translations';
-import LeafletMap from '../components/LeafletMap';
+import GoogleMap from '../components/GoogleMap';
 import {
   ShieldCheck,
   RefreshCw,
@@ -877,7 +877,7 @@ export default function AdminDashboard({ lang = 'en', currentUser, onNavigate })
             </button>
           </div>
 
-          <LeafletMap
+          <GoogleMap
             incidents={incidents}
             resources={resources}
             providers={providers}
