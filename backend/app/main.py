@@ -82,6 +82,7 @@ from app.routers.clinical_handover import router as clinical_handover_router
 from app.routers.sync import router as sync_router
 from app.routers.intelligence import router as intelligence_router
 from app.routers.coordination import router as coordination_router
+from app.routers.citizen import router as citizen_router
 
 
 @asynccontextmanager
@@ -195,6 +196,9 @@ app.include_router(intelligence_router)
 
 # Milestone 11 Router: Multi-Agency Emergency Coordination & Unified Incident Command
 app.include_router(coordination_router)
+
+# Citizen Operations Router: Emergency Profile, Onboarding & Personal Dashboard
+app.include_router(citizen_router)
 
 
 # ==============================================================================

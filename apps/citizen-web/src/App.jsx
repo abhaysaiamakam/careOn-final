@@ -10,6 +10,7 @@ import { Home } from './pages/Home.jsx';
 import { ReportEmergency } from './pages/ReportEmergency.jsx';
 import { TrackIncident } from './pages/TrackIncident.jsx';
 import { CitizenDashboard } from './pages/CitizenDashboard.jsx';
+import { Onboarding } from './pages/Onboarding.jsx';
 import { EmergencyHistory } from './pages/EmergencyHistory.jsx';
 import { Profile } from './pages/Profile.jsx';
 import { EmergencyContacts } from './pages/EmergencyContacts.jsx';
@@ -59,6 +60,13 @@ function CitizenAppShell() {
       const id = searchParams.get('id');
       return <TrackIncident onNavigate={navigate} initialId={id} />;
     }
+    if (currentPath === '/onboarding') {
+      return isAuthenticated ? (
+        <Onboarding onNavigate={navigate} />
+      ) : (
+        <Login onNavigate={navigate} />
+      );
+    }
     if (currentPath === '/dashboard') {
       return isAuthenticated ? (
         <CitizenDashboard onNavigate={navigate} />
@@ -81,7 +89,11 @@ function CitizenAppShell() {
       );
     }
     if (currentPath === '/contacts') {
-      return <EmergencyContacts onNavigate={navigate} />;
+      return isAuthenticated ? (
+        <EmergencyContacts onNavigate={navigate} />
+      ) : (
+        <Login onNavigate={navigate} />
+      );
     }
     if (currentPath === '/notifications') {
       return <Notifications onNavigate={navigate} />;
@@ -98,6 +110,7 @@ function CitizenAppShell() {
     if (currentPath === '/register') {
       return <Register onNavigate={navigate} />;
     }
+
     // Default Home
     return <Home onNavigate={navigate} />;
   };

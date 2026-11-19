@@ -29,12 +29,13 @@ print(f"Authenticated Citizen: {USER_PROFILE.get('name')}")
 
 ROUTES = [
     ('home', 'http://localhost:3002/'),
-    ('report_step1', 'http://localhost:3002/report'),
-    ('track_incident', 'http://localhost:3002/track?id=CARE-2026-101'),
+    ('onboarding', 'http://localhost:3002/onboarding'),
     ('citizen_dashboard', 'http://localhost:3002/dashboard'),
-    ('emergency_history', 'http://localhost:3002/history'),
     ('profile', 'http://localhost:3002/profile'),
     ('emergency_contacts', 'http://localhost:3002/contacts'),
+    ('report_step1', 'http://localhost:3002/report'),
+    ('track_incident', 'http://localhost:3002/track?id=CARE-2026-101'),
+    ('emergency_history', 'http://localhost:3002/history'),
     ('notifications', 'http://localhost:3002/notifications'),
     ('settings', 'http://localhost:3002/settings'),
     ('drafts', 'http://localhost:3002/drafts'),

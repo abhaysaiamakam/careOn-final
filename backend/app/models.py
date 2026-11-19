@@ -122,6 +122,8 @@ class User(Base):
         foreign_keys="OrganizationMembership.user_id",
         cascade="all, delete-orphan",
     )
+    citizen_profile = relationship("CitizenProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    emergency_contacts = relationship("CitizenEmergencyContact", back_populates="user", cascade="all, delete-orphan")
 
 
 class Incident(Base):
@@ -1755,6 +1757,69 @@ class InterAgencyAuditLog(Base):
     acting_organization = relationship("Organization", foreign_keys=[acting_organization_id])
     acting_user = relationship("User", foreign_keys=[acting_user_id])
     target_agency = relationship("Organization", foreign_keys=[target_agency_id])
+
+
+class CitizenProfile(Base):
+    """
+    Personal emergency profile for registered citizens.
+    Stores residential location, self-reported (unverified) medical context,
+    onboarding progress, and data-sharing consent.
+    """
+    __tablename__ = "citizen_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    dob = Column(String(20), nullable=True)
+    preferred_language = Column(String(10), default="en", nullable=False)
+    profile_photo_url = Column(String(255), nullable=True)
+
+    # Residential location
+    residential_address = Column(Text, nullable=True)
+    city = Column(String(100), nullable=True)
+    state = Column(String(100), nullable=True)
+    pincode = Column(String(20), nullable=True)
+    landmark = Column(String(255), nullable=True)
+    home_latitude = Column(Float, nullable=True)
+    home_longitude = Column(Float, nullable=True)
+
+    # Citizen-reported medical information (UNVERIFIED clinical status)
+    blood_group = Column(String(10), nullable=True)
+    allergies = Column(Text, nullable=True)
+    medical_conditions = Column(Text, nullable=True)
+    medications = Column(Text, nullable=True)
+    accessibility_needs = Column(Text, nullable=True)
+    is_medical_verified = Column(Boolean, default=False, nullable=False)
+
+    # Onboarding workflow progress
+    onboarding_completed = Column(Boolean, default=False, nullable=False)
+    onboarding_step = Column(Integer, default=1, nullable=False)
+    consent_data_sharing = Column(Boolean, default=False, nullable=False)
+    consent_emergency_contact = Column(Boolean, default=False, nullable=False)
+
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    user = relationship("User", back_populates="citizen_profile")
+
+
+class CitizenEmergencyContact(Base):
+    """
+    Trusted In-Case-of-Emergency (ICE) contact registered by a citizen.
+    """
+    __tablename__ = "citizen_emergency_contacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(100), nullable=False)
+    relationship_type = Column(String(50), nullable=False)  # Spouse, Parent, Child, Sibling, Friend, etc.
+    phone = Column(String(30), nullable=False)
+    is_primary = Column(Boolean, default=False, nullable=False)
+
+    created_at = Column(DateTime, default=utc_now, nullable=False)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    user = relationship("User", back_populates="emergency_contacts")
+
 
 
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { UserPlus, ArrowRight } from 'lucide-react';
+import { UserPlus, ArrowRight, AlertTriangle, ShieldCheck } from 'lucide-react';
 import {
   Button,
   Card,
@@ -38,7 +38,8 @@ export function Register({ onNavigate }) {
         confirm_password: confirmPassword,
         role: 'user',
       });
-      onNavigate('/dashboard');
+      // Route new citizens immediately to first-time safety onboarding wizard
+      onNavigate('/onboarding');
     } catch (err) {
       setError(err.message || 'Registration failed.');
     } finally {
@@ -48,13 +49,37 @@ export function Register({ onNavigate }) {
 
   return (
     <div style={{ maxWidth: '480px', margin: '40px auto', padding: '0 16px' }}>
+      {/* Emergency Bypass Notice */}
+      <div
+        style={{
+          background: '#FEF2F2',
+          border: `1px solid ${colors.secondary}`,
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={18} color={colors.secondary} />
+          <span style={{ fontSize: typography.fontSize.xs, color: '#991B1B', fontWeight: typography.fontWeight.semibold }}>
+            Need immediate help?
+          </span>
+        </div>
+        <Button size="xs" variant="primary" onClick={() => onNavigate('/report')}>
+          Report SOS Now
+        </Button>
+      </div>
+
       <Card padding="lg">
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <h1 style={{ margin: '0 0 6px', fontSize: '1.35rem', fontWeight: typography.fontWeight.bold, color: colors.textPrimary }}>
-            Create Citizen Account
+            Create Citizen Safety Account
           </h1>
           <p style={{ margin: 0, fontSize: typography.fontSize.xs, color: colors.textSecondary }}>
-            Register to keep callback records and emergency history organized.
+            Register to keep callback records and emergency ICE contacts organized.
           </p>
         </div>
 
@@ -114,9 +139,9 @@ export function Register({ onNavigate }) {
             fullWidth
             loading={loading}
             icon={UserPlus}
-            style={{ marginTop: '8px', marginBottom: '16px' }}
+            style={{ marginTop: '12px', marginBottom: '16px' }}
           >
-            Create Citizen Account
+            Create Account & Continue
           </Button>
         </form>
 
@@ -129,12 +154,12 @@ export function Register({ onNavigate }) {
                 background: 'none',
                 border: 'none',
                 color: colors.secondary,
-                fontWeight: typography.fontWeight.semibold,
+                fontWeight: typography.fontWeight.bold,
                 cursor: 'pointer',
                 padding: 0,
               }}
             >
-              Sign In
+              Sign in here
             </button>
           </span>
         </div>

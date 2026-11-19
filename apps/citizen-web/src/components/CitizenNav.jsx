@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, PlusCircle, Search, Clock, User, Settings, LogOut, LogIn, Menu, X, Bell } from 'lucide-react';
+import { Shield, PlusCircle, Search, Clock, User, Settings, LogOut, LogIn, Menu, X, Bell, Users } from 'lucide-react';
 import { colors, typography, Button } from '@careon/design-system';
 import { useAuth } from '@careon/auth';
 
@@ -13,6 +13,7 @@ export function CitizenNav({ currentPath, onNavigate }) {
     ...(isAuthenticated
       ? [
           { label: 'Dashboard', path: '/dashboard', icon: Shield },
+          { label: 'Contacts', path: '/contacts', icon: Users },
           { label: 'History', path: '/history', icon: Clock },
           { label: 'Profile', path: '/profile', icon: User },
         ]

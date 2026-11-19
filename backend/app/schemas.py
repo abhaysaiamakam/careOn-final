@@ -2069,6 +2069,143 @@ class InterAgencyAuditResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ==============================================================================
+# Citizen Emergency Profile & Onboarding Schemas
+# ==============================================================================
+class CitizenProfileResponse(BaseModel):
+    user_id: int
+    name: str
+    email: str
+    phone: str
+    trust_score: str
+    dob: Optional[str] = None
+    preferred_language: str = "en"
+    profile_photo_url: Optional[str] = None
+    residential_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+    landmark: Optional[str] = None
+    residential_city: Optional[str] = None
+    residential_state: Optional[str] = None
+    residential_postal_code: Optional[str] = None
+    address_landmark: Optional[str] = None
+    access_instructions: Optional[str] = None
+    emergency_notes: Optional[str] = None
+    home_latitude: Optional[float] = None
+    home_longitude: Optional[float] = None
+    blood_group: Optional[str] = None
+    allergies: Optional[str] = None
+    medical_conditions: Optional[str] = None
+    medications: Optional[str] = None
+    current_medications: Optional[str] = None
+    accessibility_needs: Optional[str] = None
+    is_medical_verified: bool = False
+    is_organ_donor: bool = False
+    onboarding_completed: bool = False
+    onboarding_step: int = 1
+    consent_data_sharing: bool = False
+    consent_emergency_contact: bool = False
+    consent_data_sharing_emergency: bool = True
+    readiness_score: int = 50
+    missing_critical_fields: List[str] = []
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CitizenProfileUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    phone: Optional[str] = Field(default=None, min_length=8, max_length=30)
+    dob: Optional[str] = None
+    preferred_language: Optional[str] = None
+    profile_photo_url: Optional[str] = None
+    residential_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pincode: Optional[str] = None
+    landmark: Optional[str] = None
+    residential_city: Optional[str] = None
+    residential_state: Optional[str] = None
+    residential_postal_code: Optional[str] = None
+    address_landmark: Optional[str] = None
+    access_instructions: Optional[str] = None
+    emergency_notes: Optional[str] = None
+    home_latitude: Optional[float] = None
+    home_longitude: Optional[float] = None
+    blood_group: Optional[str] = None
+    allergies: Optional[str] = None
+    medical_conditions: Optional[str] = None
+    medications: Optional[str] = None
+    current_medications: Optional[str] = None
+    accessibility_needs: Optional[str] = None
+    is_organ_donor: Optional[bool] = None
+    onboarding_step: Optional[int] = None
+    consent_data_sharing: Optional[bool] = None
+    consent_emergency_contact: Optional[bool] = None
+    consent_data_sharing_emergency: Optional[bool] = None
+
+
+class CitizenEmergencyContactCreate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=100)
+    full_name: Optional[str] = Field(default=None, max_length=100)
+    relationship_type: str = Field(..., min_length=2, max_length=50)
+    phone: str = Field(..., min_length=8, max_length=30)
+    secondary_phone: Optional[str] = Field(default=None, max_length=30)
+    email: Optional[str] = Field(default=None, max_length=100)
+    is_primary: Optional[bool] = False
+    can_authorize_medical_treatment: Optional[bool] = False
+
+
+class CitizenEmergencyContactUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=100)
+    full_name: Optional[str] = Field(default=None, max_length=100)
+    relationship_type: Optional[str] = Field(default=None, max_length=50)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    secondary_phone: Optional[str] = Field(default=None, max_length=30)
+    email: Optional[str] = Field(default=None, max_length=100)
+    is_primary: Optional[bool] = None
+    can_authorize_medical_treatment: Optional[bool] = None
+
+
+class CitizenEmergencyContactResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    full_name: Optional[str] = None
+    relationship_type: str
+    phone: str
+    secondary_phone: Optional[str] = None
+    email: Optional[str] = None
+    is_primary: bool
+    can_authorize_medical_treatment: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CitizenDashboardSummary(BaseModel):
+    user_id: int
+    name: str
+    phone: str
+    email: str
+    onboarding_completed: bool
+    onboarding_step: int
+    readiness: Dict[str, Any]
+    active_incident: Optional[Dict[str, Any]] = None
+    recent_incidents: List[Dict[str, Any]] = []
+    emergency_contacts: List[CitizenEmergencyContactResponse] = []
+    unread_notifications_count: int = 0
+    # Additional enriched fields
+    profile: Optional[CitizenProfileResponse] = None
+    contacts: List[CitizenEmergencyContactResponse] = []
+    active_incidents: List[Dict[str, Any]] = []
+    total_incidents_count: int = 0
+
+
+
 
 
 

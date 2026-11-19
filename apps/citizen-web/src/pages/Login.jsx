@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LogIn, ArrowRight, ShieldCheck, Heart } from 'lucide-react';
+import { LogIn, ArrowRight, ShieldCheck, Heart, AlertTriangle } from 'lucide-react';
 import {
   Button,
   Card,
@@ -8,6 +8,7 @@ import {
   colors,
   typography,
 } from '@careon/design-system';
+import { getCitizenProfile } from '@careon/api-client';
 import { useAuth } from '@careon/auth';
 
 export function Login({ onNavigate }) {
@@ -23,6 +24,18 @@ export function Login({ onNavigate }) {
     setError(null);
     try {
       await login(email.trim(), password);
+
+      // Check onboarding status
+      try {
+        const prof = await getCitizenProfile();
+        if (prof && !prof.onboarding_completed) {
+          onNavigate('/onboarding');
+          return;
+        }
+      } catch (profErr) {
+        console.warn('Could not check onboarding status:', profErr);
+      }
+
       onNavigate('/dashboard');
     } catch (err) {
       setError(err.message || 'Login failed. Please verify credentials.');
@@ -33,6 +46,30 @@ export function Login({ onNavigate }) {
 
   return (
     <div style={{ maxWidth: '440px', margin: '40px auto', padding: '0 16px' }}>
+      {/* Emergency SOS Bypass Banner */}
+      <div
+        style={{
+          background: '#FEF2F2',
+          border: `1px solid ${colors.secondary}`,
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={18} color={colors.secondary} />
+          <span style={{ fontSize: typography.fontSize.xs, color: '#991B1B', fontWeight: typography.fontWeight.semibold }}>
+            Experiencing a live emergency?
+          </span>
+        </div>
+        <Button size="xs" variant="primary" onClick={() => onNavigate('/report')}>
+          Report SOS Now
+        </Button>
+      </div>
+
       <Card padding="lg">
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <div
@@ -104,12 +141,12 @@ export function Login({ onNavigate }) {
                 background: 'none',
                 border: 'none',
                 color: colors.secondary,
-                fontWeight: typography.fontWeight.semibold,
+                fontWeight: typography.fontWeight.bold,
                 cursor: 'pointer',
                 padding: 0,
               }}
             >
-              Create Account
+              Register here
             </button>
           </span>
         </div>
