@@ -1,0 +1,16 @@
+{
+  "name": "@careon/design-system",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./tokens": "./tokens.js",
+    "./theme.css": "./theme.css"
+  },
+  "peerDependencies": {
+    "lucide-react": "^1.74.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  }
+}

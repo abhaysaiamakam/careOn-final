@@ -1,0 +1,14 @@
+{
+  "name": "@careon/api-client",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./auth": "./auth.js",
+    "./incidents": "./incidents.js",
+    "./profile": "./profile.js",
+    "./notifications": "./notifications.js"
+  }
+}

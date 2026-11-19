@@ -1,0 +1,17 @@
+{
+  "name": "careon",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:citizen": "npm run dev --prefix apps/citizen-web",
+    "build:citizen": "npm run build --prefix apps/citizen-web",
+    "test:citizen": "npm run test --prefix apps/citizen-web",
+    "dev:legacy": "npm run dev --prefix frontend",
+    "test:legacy": "npm run test --prefix frontend"
+  }
+}
