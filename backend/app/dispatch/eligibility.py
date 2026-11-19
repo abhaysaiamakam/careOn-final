@@ -14,7 +14,7 @@ Incompatible, committed, or stale-location resources are excluded or flagged.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy.orm import Session
 
 from app.models import Resource, Assignment, Incident

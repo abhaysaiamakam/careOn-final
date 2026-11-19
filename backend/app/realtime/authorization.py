@@ -11,7 +11,7 @@ Enforces:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Set
+from typing import Any, List, Optional, Set
 import logging
 from sqlalchemy.orm import Session
 

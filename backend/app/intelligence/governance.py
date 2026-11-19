@@ -13,7 +13,7 @@ import uuid
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
