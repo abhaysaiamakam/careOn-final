@@ -136,20 +136,24 @@ def relay_pending_outbox_events(db: Session, limit: int = 50) -> int:
     """
     Background relay worker: queries pending outbox records and republishes them to Redis.
     Called periodically or after reconnects.
+    Uses SKIP LOCKED on PostgreSQL to prevent race conditions across multiple worker processes.
+    At-least-once delivery: crashes between publish and commit will re-publish with stable event_id.
     """
-    pending = (
+    r = get_redis_client()
+    if not r:
+        return 0
+
+    query = (
         db.query(OutboxEvent)
         .filter(OutboxEvent.is_published == False, OutboxEvent.retry_count < 10)
         .order_by(OutboxEvent.created_at.asc())
         .limit(limit)
-        .all()
     )
+    if db.bind and db.bind.dialect.name == "postgresql":
+        query = query.with_for_update(skip_locked=True)
+    pending = query.all()
 
     if not pending:
-        return 0
-
-    r = get_redis_client()
-    if not r:
         return 0
 
     success_count = 0
@@ -179,7 +183,11 @@ def relay_pending_outbox_events(db: Session, limit: int = 50) -> int:
             record.retry_count += 1
             record.last_error = str(exc)
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return success_count
 
 

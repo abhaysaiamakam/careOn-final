@@ -63,6 +63,7 @@ services:
       CAREON_ENV: ${CAREON_ENV:-production}
       CAREON_SECRET_KEY: ${CAREON_SECRET_KEY:?Set CAREON_SECRET_KEY in .env}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://careon.org,https://app.careon.org}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1,172.16.0.0/12}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
       PYTHONUNBUFFERED: "1"
@@ -79,6 +80,33 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # ── Background Worker Daemon (Outbox Relay, Sync Recovery, Expiries) ─────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: careon-backend:latest
+    container_name: careon-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker_daemon"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://careon:${POSTGRES_PASSWORD}@postgres/careon
+      REDIS_URL: redis://redis:6379/0
+      CAREON_ENV: ${CAREON_ENV:-production}
+      CAREON_SECRET_KEY: ${CAREON_SECRET_KEY:?Set CAREON_SECRET_KEY in .env}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - careon-net
 
   # ── React Frontend ────────────────────────────────────────────────────────
   frontend:

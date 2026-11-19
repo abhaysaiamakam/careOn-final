@@ -11,10 +11,13 @@ logger = logging.getLogger("careon.database")
 def normalize_database_url(url: str) -> str:
     """
     Ensure correct driver prefix for PostgreSQL (psycopg 3).
-    PostgreSQL URLs without driver (postgres:// or postgresql://) are normalized to postgresql+psycopg://.
+    PostgreSQL URLs without driver (postgres:// or postgresql://) or with psycopg2
+    are normalized to postgresql+psycopg://.
     """
     if url.startswith("postgres://"):
         return re.sub(r"^postgres://", "postgresql+psycopg://", url)
+    if url.startswith("postgresql+psycopg2://"):
+        return re.sub(r"^postgresql\+psycopg2://", "postgresql+psycopg://", url)
     if url.startswith("postgresql://") and not url.startswith("postgresql+"):
         return re.sub(r"^postgresql://", "postgresql+psycopg://", url)
     return url
@@ -37,6 +40,26 @@ def get_engine_args(url: str) -> dict:
         engine_args["pool_timeout"] = int(os.getenv("DB_POOL_TIMEOUT", "30"))
         engine_args["pool_recycle"] = int(os.getenv("DB_POOL_RECYCLE", "1800"))
         engine_args["pool_pre_ping"] = True
+
+        connect_args = {}
+        # PostGIS schema support (Supabase installs PostGIS in the 'extensions' schema)
+        search_path = os.getenv("DB_SEARCH_PATH", "public,extensions")
+        connect_args["options"] = f"-c search_path={search_path}"
+
+        # PgBouncer / Transaction pooler compatibility (e.g. Supabase port 6543)
+        # In transaction pooling mode, automatic prepared statements can collide across connections.
+        prep_threshold_env = os.getenv("DB_PREPARE_THRESHOLD")
+        if prep_threshold_env is not None:
+            connect_args["prepare_threshold"] = None if prep_threshold_env.lower() in ("none", "null", "false", "0") else int(prep_threshold_env)
+        elif ":6543" in url:
+            # Standard Supabase PgBouncer transaction pooler port
+            connect_args["prepare_threshold"] = None
+
+        sslmode_env = os.getenv("DB_SSLMODE")
+        if sslmode_env:
+            connect_args["sslmode"] = sslmode_env
+
+        engine_args["connect_args"] = connect_args
     return engine_args
 
 

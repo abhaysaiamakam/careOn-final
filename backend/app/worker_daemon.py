@@ -10,6 +10,7 @@ Periodically invokes:
 import time
 import logging
 import sys
+import signal
 from app.database import SessionLocal
 from app.realtime.event_publisher import relay_pending_outbox_events
 from app.coordination.worker import sweep_coordination_expiries
@@ -23,13 +24,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger("careon.worker_daemon")
 
+_shutdown_requested = False
+
+
+def _signal_handler(signum, frame):
+    global _shutdown_requested
+    logger.info(f"Shutdown signal ({signum}) received. Finishing active cycle and shutting down gracefully...")
+    _shutdown_requested = True
+
+
 def main():
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
     logger.info("CareOn Background Worker Daemon initialized.")
     last_5s = 0.0
     last_30s = 0.0
     last_60s = 0.0
 
-    while True:
+    while not _shutdown_requested:
         now = time.time()
         # 1. Outbox relay (every 5s)
         if now - last_5s >= 5.0:

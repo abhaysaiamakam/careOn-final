@@ -5,6 +5,7 @@ import logging
 from typing import Dict, List, Tuple
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import Session
+from app.database import normalize_database_url, get_engine_args
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("careon.migration")
@@ -56,7 +57,8 @@ def migrate_sqlite_to_postgres(sqlite_path: str, pg_url: str) -> Dict[str, any]:
     sqlite_engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
 
     logger.info(f"Connecting to destination PostgreSQL DB: {pg_url}")
-    pg_engine = create_engine(pg_url)
+    normalized_pg_url = normalize_database_url(pg_url)
+    pg_engine = create_engine(normalized_pg_url, **get_engine_args(normalized_pg_url))
 
     sqlite_inspector = inspect(sqlite_engine)
     available_sqlite_tables = set(sqlite_inspector.get_table_names())
