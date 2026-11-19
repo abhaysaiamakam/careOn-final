@@ -1,52 +1,54 @@
 /**
  * CareOn Client Auth Storage.
- * Isolates token storage logic.
+ * Isolates token storage logic with customizable storage prefixes.
  */
 
-const ACCESS_TOKEN_KEY = 'careon_citizen_access_token';
-const REFRESH_TOKEN_KEY = 'careon_citizen_refresh_token';
-const USER_KEY = 'careon_citizen_user';
+let activePrefix = 'careon_auth';
 
-export function getStoredAccessToken() {
+export function configureAuthStoragePrefix(prefix) {
+  if (prefix) activePrefix = prefix;
+}
+
+export function getStoredAccessToken(prefix = activePrefix) {
   try {
-    return localStorage.getItem(ACCESS_TOKEN_KEY);
+    return localStorage.getItem(`${prefix}_access_token`);
   } catch (e) {
     return null;
   }
 }
 
-export function getStoredRefreshToken() {
+export function getStoredRefreshToken(prefix = activePrefix) {
   try {
-    return localStorage.getItem(REFRESH_TOKEN_KEY);
+    return localStorage.getItem(`${prefix}_refresh_token`);
   } catch (e) {
     return null;
   }
 }
 
-export function getStoredUser() {
+export function getStoredUser(prefix = activePrefix) {
   try {
-    const raw = localStorage.getItem(USER_KEY);
+    const raw = localStorage.getItem(`${prefix}_user`);
     return raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null;
   }
 }
 
-export function setStoredAuth(accessToken, refreshToken, user) {
+export function setStoredAuth(accessToken, refreshToken, user, prefix = activePrefix) {
   try {
-    if (accessToken) localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    if (refreshToken) localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+    if (accessToken) localStorage.setItem(`${prefix}_access_token`, accessToken);
+    if (refreshToken) localStorage.setItem(`${prefix}_refresh_token`, refreshToken);
+    if (user) localStorage.setItem(`${prefix}_user`, JSON.stringify(user));
   } catch (e) {
     console.error('Failed to store auth tokens:', e);
   }
 }
 
-export function clearStoredAuth() {
+export function clearStoredAuth(prefix = activePrefix) {
   try {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(`${prefix}_access_token`);
+    localStorage.removeItem(`${prefix}_refresh_token`);
+    localStorage.removeItem(`${prefix}_user`);
   } catch (e) {
     console.error('Failed to clear auth storage:', e);
   }

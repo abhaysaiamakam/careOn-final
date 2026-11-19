@@ -8,6 +8,9 @@
     "apps/*"
   ],
   "scripts": {
+    "dev:command": "npm run dev --prefix apps/command-web",
+    "build:command": "npm run build --prefix apps/command-web",
+    "test:command": "npm run test --prefix apps/command-web",
     "dev:citizen": "npm run dev --prefix apps/citizen-web",
     "build:citizen": "npm run build --prefix apps/citizen-web",
     "test:citizen": "npm run test --prefix apps/citizen-web",

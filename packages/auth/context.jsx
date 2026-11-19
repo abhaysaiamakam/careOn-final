@@ -5,6 +5,7 @@ import {
   getStoredUser,
   setStoredAuth,
   clearStoredAuth,
+  configureAuthStoragePrefix,
 } from './storage.js';
 
 const AuthContext = createContext({
@@ -21,9 +22,14 @@ const AuthContext = createContext({
 export function AuthProvider({
   children,
   apiClient, // Injected @careon/api-client
+  storagePrefix = 'careon_auth',
 }) {
-  const [user, setUser] = useState(getStoredUser());
-  const [accessToken, setAccessToken] = useState(getStoredAccessToken());
+  useEffect(() => {
+    configureAuthStoragePrefix(storagePrefix);
+  }, [storagePrefix]);
+
+  const [user, setUser] = useState(() => getStoredUser(storagePrefix));
+  const [accessToken, setAccessToken] = useState(() => getStoredAccessToken(storagePrefix));
   const [isLoading, setIsLoading] = useState(true);
 
   // Bind token getter to api client
@@ -37,7 +43,7 @@ export function AuthProvider({
   useEffect(() => {
     let mounted = true;
     async function initAuth() {
-      const token = getStoredAccessToken();
+      const token = getStoredAccessToken(storagePrefix);
       if (!token) {
         if (mounted) setIsLoading(false);
         return;
@@ -48,13 +54,13 @@ export function AuthProvider({
           const profile = await apiClient.getMe();
           if (mounted) {
             setUser(profile);
-            setStoredAuth(token, getStoredRefreshToken(), profile);
+            setStoredAuth(token, getStoredRefreshToken(storagePrefix), profile, storagePrefix);
           }
         }
       } catch (err) {
         // If 401 or invalid, clear stored tokens
         if (err.status === 401) {
-          clearStoredAuth();
+          clearStoredAuth(storagePrefix);
           if (mounted) {
             setUser(null);
             setAccessToken(null);
@@ -69,7 +75,7 @@ export function AuthProvider({
     return () => {
       mounted = false;
     };
-  }, [apiClient]);
+  }, [apiClient, storagePrefix]);
 
   const login = useCallback(
     async (email, password) => {
@@ -91,10 +97,10 @@ export function AuthProvider({
 
       setAccessToken(token);
       setUser(profile);
-      setStoredAuth(token, refreshTok, profile);
+      setStoredAuth(token, refreshTok, profile, storagePrefix);
       return profile;
     },
-    [apiClient]
+    [apiClient, storagePrefix]
   );
 
   const register = useCallback(
@@ -108,7 +114,7 @@ export function AuthProvider({
   );
 
   const logout = useCallback(async () => {
-    const refreshTok = getStoredRefreshToken();
+    const refreshTok = getStoredRefreshToken(storagePrefix);
     if (apiClient && apiClient.logoutUser && refreshTok) {
       try {
         await apiClient.logoutUser(refreshTok);
@@ -116,29 +122,30 @@ export function AuthProvider({
         // Silently continue local logout
       }
     }
-    clearStoredAuth();
+    clearStoredAuth(storagePrefix);
     setUser(null);
     setAccessToken(null);
-  }, [apiClient]);
+  }, [apiClient, storagePrefix]);
 
   const refreshProfile = useCallback(async () => {
     if (apiClient && apiClient.getMyProfile) {
       try {
         const profile = await apiClient.getMyProfile();
         setUser(profile);
-        setStoredAuth(accessToken, getStoredRefreshToken(), profile);
+        setStoredAuth(accessToken, getStoredRefreshToken(storagePrefix), profile, storagePrefix);
       } catch (e) {
         console.error('Failed to refresh profile:', e);
       }
     }
-  }, [apiClient, accessToken]);
+  }, [apiClient, accessToken, storagePrefix]);
 
   return (
     <AuthContext.Provider
       value={{
         user,
         accessToken,
-        isAuthenticated: Boolean(user && accessToken),
+        isAuthenticated: Boolean(accessToken && user),
+        role: user?.role || null,
         isLoading,
         login,
         register,

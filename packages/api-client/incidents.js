@@ -27,6 +27,27 @@ export async function getIncidentDetails(identifier) {
   });
 }
 
+export async function updateIncidentStatus(incidentId, statusVal, internalNotes = '') {
+  return request(`/api/incidents/${incidentId}/status`, {
+    method: 'PATCH',
+    body: { status: statusVal, internal_admin_notes: internalNotes },
+  });
+}
+
+export async function updateIncidentPriority(incidentId, priorityVal, reason = '') {
+  return request(`/api/incidents/${incidentId}/priority`, {
+    method: 'PATCH',
+    body: { priority: priorityVal, priority_reason: reason },
+  });
+}
+
+export async function resolveIncident(incidentId, notes = '') {
+  return request(`/api/incidents/${incidentId}/resolve`, {
+    method: 'POST',
+    body: { notes },
+  });
+}
+
 export async function trackPublicIncident(trackingToken) {
   return request(`/api/incidents/track/${encodeURIComponent(trackingToken.trim())}`, {
     method: 'GET',
@@ -56,5 +77,17 @@ export async function submitIncidentFeedback(incidentId, rating, comments = '', 
       comments,
       tags,
     },
+  });
+}
+
+export async function getOperationalAnalytics() {
+  return request('/api/analytics', {
+    method: 'GET',
+  });
+}
+
+export async function getShortagesSummary() {
+  return request('/api/shortages', {
+    method: 'GET',
   });
 }
