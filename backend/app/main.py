@@ -204,7 +204,13 @@ ALLOWED_ORIGINS_ENV = os.getenv("ALLOWED_ORIGINS")
 if ALLOWED_ORIGINS_ENV:
     cors_origins = [orig.strip() for orig in ALLOWED_ORIGINS_ENV.split(",") if orig.strip()]
 elif os.getenv("CAREON_ENV", os.getenv("ENVIRONMENT", "development")).lower() in ("production", "prod"):
-    cors_origins = ["https://careon.org", "https://app.careon.org"]
+    cors_origins = [
+        "https://careon.org",
+        "https://app.careon.org",
+        "https://careon-final-citizen-web.vercel.app",
+        "https://careon-final-command-web.vercel.app",
+        "https://careon-final-responder-web.vercel.app",
+    ]
 else:
     cors_origins = ["*"]
 

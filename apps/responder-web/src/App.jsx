@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import * as apiClient from '@careon/api-client';
 import { AuthProvider, useAuth } from '@careon/auth';
 import { 
   getResponderMe, 
@@ -460,7 +461,7 @@ function ResponderAppContent() {
 
 export default function App() {
   return (
-    <AuthProvider storagePrefix="careon_responder">
+    <AuthProvider apiClient={apiClient} storagePrefix="careon_responder">
       <ResponderAppContent />
     </AuthProvider>
   );
